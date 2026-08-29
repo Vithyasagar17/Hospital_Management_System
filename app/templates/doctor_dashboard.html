@@ -5,15 +5,53 @@
 <section class="hms-dashboard-hero">
   <div class="hms-kicker">Clinical workspace</div>
   <h2>Welcome, Dr. {{ doctor_name }}.</h2>
-  <p>Stay focused on patient care with quick access to appointments, records, prescriptions, and your working availability.</p>
+  <p>Your day at a glance—appointments needing action, confirmed consultations, and the upcoming schedule.</p>
 </section>
 
-{% if needs_profile %}<div class="alert alert-warning"><i class="bi bi-exclamation-triangle-fill me-2"></i>Your profile is incomplete — please <a href="{{ url_for('doctor.doctor_profile') }}" class="alert-link">complete your profile</a> so your full name is displayed.</div>{% endif %}
+{% if needs_profile %}<div class="alert alert-warning"><i class="bi bi-exclamation-triangle-fill me-2"></i>Your profile is incomplete — please <a href="{{ url_for('doctor.doctor_profile') }}" class="alert-link">complete your profile</a>.</div>{% endif %}
 
-<div class="row g-4 hms-action-grid">
-  <div class="col-md-6 col-xl-4"><div class="hms-action-card" style="--accent:#168a5b;--soft:#e8f7f0;"><div class="hms-icon"><i class="bi bi-calendar2-week"></i></div><div><h3>Appointments</h3><p>Review visits and update appointment status or notes.</p></div><a href="{{ url_for('doctor.view_appointments') }}" class="btn btn-success">Manage visits</a></div></div>
-  <div class="col-md-6 col-xl-4"><div class="hms-action-card" style="--accent:#5b5ce2;--soft:#eeefff;"><div class="hms-icon"><i class="bi bi-people"></i></div><div><h3>Patient records</h3><p>Access patient profiles and their clinical history.</p></div><a href="{{ url_for('doctor.doctor_patients') }}" class="btn btn-primary">Open records</a></div></div>
-  <div class="col-md-6 col-xl-4"><div class="hms-action-card" style="--accent:#c9781b;--soft:#fff4df;"><div class="hms-icon"><i class="bi bi-capsule-pill"></i></div><div><h3>Prescriptions</h3><p>Create and maintain prescriptions linked to appointments.</p></div><a href="{{ url_for('doctor.prescriptions') }}" class="btn btn-warning">Manage</a></div></div>
-  <div class="col-md-6 col-xl-4"><div class="hms-action-card" style="--accent:#0f9f92;--soft:#e7f8f5;"><div class="hms-icon"><i class="bi bi-clock-history"></i></div><div><h3>Availability</h3><p>Set the days and time windows patients can book.</p></div><a href="{{ url_for('doctor.manage_availability') }}" class="btn btn-outline-primary">Set hours</a></div></div>
+<div class="row g-3 mb-4">
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon info"><i class="bi bi-calendar2-day"></i></span><div><strong>{{ today_appointments }}</strong><small>Visits today</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon warning"><i class="bi bi-hourglass-split"></i></span><div><strong>{{ pending_count }}</strong><small>Awaiting decision</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon success"><i class="bi bi-calendar2-check"></i></span><div><strong>{{ confirmed_count }}</strong><small>Confirmed</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon primary"><i class="bi bi-check2-circle"></i></span><div><strong>{{ completed_count }}</strong><small>Completed</small></div></div></div>
 </div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-7">
+    <div class="hms-panel h-100">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Next 7 days</span><h3>Consultation load</h3></div><i class="bi bi-graph-up"></i></div>
+      <div class="hms-chart-wrap"><canvas id="doctorWeekChart"></canvas></div>
+    </div>
+  </div>
+  <div class="col-xl-5">
+    <div class="hms-panel h-100">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Coming up</span><h3>Next appointments</h3></div><a class="hms-text-link" href="{{ url_for('doctor.view_appointments') }}">Manage <i class="bi bi-arrow-right"></i></a></div>
+      {% if upcoming %}
+      <div class="hms-schedule-list">
+        {% for a in upcoming %}
+        <div class="hms-schedule-item"><div class="hms-date-tile"><strong>{{ a.date.strftime('%d') }}</strong><small>{{ a.date.strftime('%b') }}</small></div><div class="flex-grow-1"><strong>{{ a.patient.name if a.patient else 'Patient' }}</strong><small>{{ a.date.strftime('%I:%M %p') }} · {{ a.reason|truncate(42) }}</small></div><span class="badge {% if a.status == 'Pending' %}bg-warning{% else %}bg-success{% endif %}">{{ a.status }}</span></div>
+        {% endfor %}
+      </div>
+      {% else %}<div class="hms-empty"><i class="bi bi-calendar2-check"></i>No upcoming appointments.</div>{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 hms-action-grid">
+  <div class="col-md-6 col-xl-3"><div class="hms-action-card"><div class="hms-icon"><i class="bi bi-calendar2-week"></i></div><div><h3>Appointments</h3><p>Confirm requests, complete visits, or cancel when needed.</p></div><a href="{{ url_for('doctor.view_appointments') }}" class="btn btn-primary">Manage visits</a></div></div>
+  <div class="col-md-6 col-xl-3"><div class="hms-action-card"><div class="hms-icon"><i class="bi bi-clock-history"></i></div><div><h3>Availability</h3><p>Publish bookable working windows for the next two weeks.</p></div><a href="{{ url_for('doctor.manage_availability') }}" class="btn btn-outline-primary">Set schedule</a></div></div>
+  <div class="col-md-6 col-xl-3"><div class="hms-action-card"><div class="hms-icon"><i class="bi bi-people"></i></div><div><h3>Patients</h3><p>Open patient profiles and completed visit history.</p></div><a href="{{ url_for('doctor.doctor_patients') }}" class="btn btn-outline-primary">Patient records</a></div></div>
+  <div class="col-md-6 col-xl-3"><div class="hms-action-card"><div class="hms-icon"><i class="bi bi-capsule-pill"></i></div><div><h3>Prescriptions</h3><p>Create prescriptions for confirmed consultations.</p></div><a href="{{ url_for('doctor.prescriptions') }}" class="btn btn-outline-primary">Prescriptions</a></div></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+new Chart(document.getElementById('doctorWeekChart'), {
+  type: 'bar',
+  data: { labels: {{ chart_labels|tojson }}, datasets: [{ label: 'Appointments', data: {{ chart_values|tojson }}, borderRadius: 8, borderSkipped: false }] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { grid: { display: false } } } }
+});
+</script>
 {% endblock %}

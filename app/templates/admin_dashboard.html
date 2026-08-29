@@ -5,14 +5,73 @@
 <section class="hms-dashboard-hero">
   <div class="hms-kicker">Operations control center</div>
   <h2>Welcome, {{ current_user.username }}.</h2>
-  <p>Manage the hospital directory, patient records, appointment activity, and operational overview from one workspace.</p>
+  <p>Monitor hospital activity at a glance, then jump straight into the records and schedules that need attention.</p>
 </section>
 
-<div class="row g-4 hms-action-grid">
-  <div class="col-md-6 col-xl-4"><div class="hms-action-card" style="--accent:#5b5ce2;--soft:#eeefff;"><div class="hms-icon"><i class="bi bi-person-badge"></i></div><div><h3>Doctors</h3><p>Add, edit, blacklist, or restore doctor accounts.</p></div><a href="{{ url_for('admin.admin_doctors') }}" class="btn btn-primary">Manage doctors</a></div></div>
-  <div class="col-md-6 col-xl-4"><div class="hms-action-card" style="--accent:#168a5b;--soft:#e8f7f0;"><div class="hms-icon"><i class="bi bi-people"></i></div><div><h3>Patients</h3><p>Review and maintain registered patient records.</p></div><a href="{{ url_for('admin.admin_patients') }}" class="btn btn-success">Manage patients</a></div></div>
-  <div class="col-md-6 col-xl-4"><div class="hms-action-card" style="--accent:#c9781b;--soft:#fff4df;"><div class="hms-icon"><i class="bi bi-calendar2-week"></i></div><div><h3>Appointments</h3><p>Inspect the full appointment schedule across the hospital.</p></div><a href="{{ url_for('admin.admin_appointments') }}" class="btn btn-warning">View schedule</a></div></div>
-  <div class="col-md-6 col-xl-4"><div class="hms-action-card" style="--accent:#277fbf;--soft:#eaf5fd;"><div class="hms-icon"><i class="bi bi-search"></i></div><div><h3>Search records</h3><p>Quickly locate doctors or patients by stored details.</p></div><a href="{{ url_for('admin.search') }}" class="btn btn-info">Search</a></div></div>
-  <div class="col-md-6 col-xl-4"><div class="hms-action-card" style="--accent:#657084;--soft:#f0f2f5;"><div class="hms-icon"><i class="bi bi-bar-chart-line"></i></div><div><h3>System overview</h3><p>See consolidated doctors, patients, and appointments.</p></div><a href="{{ url_for('admin.admin_overview') }}" class="btn btn-secondary">Open overview</a></div></div>
+<div class="row g-3 mb-4">
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon primary"><i class="bi bi-person-badge"></i></span><div><strong>{{ total_doctors }}</strong><small>Active doctors</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon success"><i class="bi bi-people"></i></span><div><strong>{{ total_patients }}</strong><small>Active patients</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon info"><i class="bi bi-calendar2-check"></i></span><div><strong>{{ appointments_today }}</strong><small>Appointments today</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon warning"><i class="bi bi-activity"></i></span><div><strong>{{ total_appointments }}</strong><small>Total appointments</small></div></div></div>
 </div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-8">
+    <div class="hms-panel h-100">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Last 7 days</span><h3>Appointment activity</h3></div><i class="bi bi-graph-up-arrow"></i></div>
+      <div class="hms-chart-wrap"><canvas id="adminActivityChart" aria-label="Appointments in the last seven days"></canvas></div>
+    </div>
+  </div>
+  <div class="col-xl-4">
+    <div class="hms-panel h-100">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Workflow</span><h3>Status snapshot</h3></div><i class="bi bi-pie-chart"></i></div>
+      <div class="hms-status-stack">
+        {% for label, value, cls in [('Pending', status_counts.Pending, 'warning'), ('Confirmed', status_counts.Confirmed, 'success'), ('Completed', status_counts.Completed, 'primary'), ('Cancelled', status_counts.Cancelled, 'danger')] %}
+        <div class="hms-status-row"><span><i class="hms-status-dot {{ cls }}"></i>{{ label }}</span><strong>{{ value }}</strong></div>
+        {% endfor %}
+      </div>
+      <a href="{{ url_for('admin.admin_appointments') }}" class="btn btn-outline-primary w-100 mt-3">Review all appointments</a>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-8">
+    <div class="hms-panel">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Latest activity</span><h3>Recent appointments</h3></div><a href="{{ url_for('admin.admin_appointments') }}" class="hms-text-link">View all <i class="bi bi-arrow-right"></i></a></div>
+      {% if recent_appointments %}
+      <div class="hms-activity-list">
+        {% for a in recent_appointments %}
+        <div class="hms-activity-item">
+          <span class="hms-activity-icon"><i class="bi bi-calendar2-event"></i></span>
+          <div class="flex-grow-1"><strong>{{ a.patient.name if a.patient else 'Patient' }} → Dr. {{ a.doctor.name if a.doctor else 'Doctor' }}</strong><small>{{ a.date.strftime('%d %b %Y · %I:%M %p') if a.date else 'Date unavailable' }} · {{ a.reason|truncate(58) }}</small></div>
+          <span class="badge {% if a.status == 'Pending' %}bg-warning{% elif a.status == 'Confirmed' %}bg-success{% elif a.status == 'Cancelled' %}bg-danger{% else %}bg-primary{% endif %}">{{ a.status }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}<div class="hms-empty"><i class="bi bi-calendar2-x"></i>No appointment activity yet.</div>{% endif %}
+    </div>
+  </div>
+  <div class="col-xl-4">
+    <div class="hms-panel">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Shortcuts</span><h3>Management</h3></div><i class="bi bi-lightning-charge"></i></div>
+      <div class="hms-quick-links">
+        <a href="{{ url_for('admin.admin_doctors') }}"><span><i class="bi bi-person-badge"></i></span><div><strong>Doctors</strong><small>Manage medical staff</small></div><i class="bi bi-chevron-right"></i></a>
+        <a href="{{ url_for('admin.admin_patients') }}"><span><i class="bi bi-people"></i></span><div><strong>Patients</strong><small>Maintain patient records</small></div><i class="bi bi-chevron-right"></i></a>
+        <a href="{{ url_for('admin.search') }}"><span><i class="bi bi-search"></i></span><div><strong>Search</strong><small>Find records quickly</small></div><i class="bi bi-chevron-right"></i></a>
+        <a href="{{ url_for('admin.admin_overview') }}"><span><i class="bi bi-bar-chart-line"></i></span><div><strong>Overview</strong><small>Consolidated system data</small></div><i class="bi bi-chevron-right"></i></a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+new Chart(document.getElementById('adminActivityChart'), {
+  type: 'line',
+  data: { labels: {{ chart_labels|tojson }}, datasets: [{ label: 'Appointments', data: {{ chart_values|tojson }}, tension: .35, fill: true, borderWidth: 2 }] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { grid: { display: false } } } }
+});
+</script>
 {% endblock %}

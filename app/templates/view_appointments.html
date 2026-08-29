@@ -1,52 +1,12 @@
 {% extends 'layout.html' %}
-
 {% block title %}My appointments{% endblock %}
 {% block page_title %}My appointments{% endblock %}
 {% block content %}
-<div class="container mt-4">
-    <h2>My Appointments</h2>
-    <div class="mb-3">
-        <a href="{{ url_for('patient.book_appointment') }}" class="btn btn-primary">Book New Appointment</a>
-    </div>
-
-    <div class="table-responsive">
-        <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th>Date</th>
-                    <th>Time</th>
-                    <th>Doctor</th>
-                    <th>Reason</th>
-                    <th>Status</th>
-                    <th>Doctor's Notes</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for appointment in appointments %}
-                <tr>
-                    <td>{{ appointment.date.strftime('%Y-%m-%d') }}</td>
-                    <td>{{ appointment.time }}</td>
-                    <td>Dr. {{ appointment.doctor.name }}</td>
-                    <td>{{ appointment.reason }}</td>
-                    <td>
-                        <span class="badge {% if appointment.status == 'Pending' %}bg-warning
-                                         {% elif appointment.status == 'Confirmed' %}bg-success
-                                         {% elif appointment.status == 'Cancelled' %}bg-danger
-                                         {% else %}bg-primary{% endif %}">
-                            {{ appointment.status }}
-                        </span>
-                    </td>
-                    <td>{{ appointment.notes if appointment.notes else 'No notes yet' }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    {% if not appointments %}
-    <div class="alert alert-info">
-        You don't have any appointments yet.
-    </div>
-    {% endif %}
+<div class="page-header"><div><h2 class="page-title">My appointments</h2><p class="page-subtitle">Track each request from booking through consultation.</p></div><a href="{{ url_for('patient.book_appointment') }}" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>New appointment</a></div>
+<div class="hms-filter-bar mb-3">{% for value,label in [('all','All'),('Pending','Pending'),('Confirmed','Confirmed'),('Completed','Completed'),('Cancelled','Cancelled')] %}<a href="{{ url_for('patient.view_appointments', status=value) }}" class="hms-filter-chip {% if status == value %}active{% endif %}">{{ label }}</a>{% endfor %}</div>
+{% if appointments %}
+<div class="hms-appointment-list">
+{% for a in appointments %}<article class="hms-appointment-card"><div class="hms-appointment-main"><div class="hms-date-tile"><strong>{{ a.date.strftime('%d') }}</strong><small>{{ a.date.strftime('%b') }}</small></div><div class="flex-grow-1"><div class="d-flex flex-wrap gap-2 align-items-center mb-1"><h3>Dr. {{ a.doctor.name if a.doctor else 'Doctor' }}</h3><span class="badge {% if a.status == 'Pending' %}bg-warning{% elif a.status == 'Confirmed' %}bg-success{% elif a.status == 'Cancelled' %}bg-danger{% else %}bg-primary{% endif %}">{{ a.status }}</span></div><p><i class="bi bi-clock me-1"></i>{{ a.date.strftime('%d %b %Y · %I:%M %p') }} &nbsp;·&nbsp; {{ a.reason }}</p>{% if a.notes %}<small class="hms-note"><i class="bi bi-chat-left-text me-1"></i>{{ a.notes }}</small>{% endif %}</div></div>{% if a.status in ['Pending','Confirmed'] and a.date > now %}<form method="POST" action="{{ url_for('patient.cancel_appointment', appointment_id=a.id) }}"><button class="btn btn-outline-danger btn-sm" onclick="return confirm('Cancel this appointment?')"><i class="bi bi-x-circle me-1"></i>Cancel appointment</button></form>{% endif %}</article>{% endfor %}
 </div>
+{% else %}<div class="hms-empty"><i class="bi bi-calendar2-plus"></i><p>You have no appointments in this category.</p><a href="{{ url_for('patient.book_appointment') }}" class="btn btn-primary btn-sm">Book appointment</a></div>{% endif %}
 {% endblock %}

@@ -10,24 +10,24 @@ Set-Location $scriptDir
 $venvPath = Join-Path $scriptDir 'venv'
 $activate = Join-Path $venvPath 'Scripts\Activate.ps1'
 
-if (Test-Path $activate) {
-    . $activate
-} else {
+if (-not (Test-Path $activate)) {
     python -m venv venv
-    . $activate
 }
+. $activate
 
 if ($Install) {
-    pip install --upgrade pip
-    pip install -r requirements.txt
+    python -m ensurepip --upgrade
+    python -m pip install --upgrade pip
+    python -m pip install -r requirements.txt
 }
 
+# Safe default: start the app without deleting the existing database.
 if (-not ($CreateDB -or $Run)) {
-    $CreateDB = $true
     $Run = $true
 }
 
 if ($CreateDB) {
+    Write-Warning 'create_db.py resets instance/hms.db. Existing data will be deleted.'
     python create_db.py
 }
 

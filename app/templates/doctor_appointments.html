@@ -1,60 +1,29 @@
 {% extends 'layout.html' %}
-
 {% block title %}Appointments{% endblock %}
 {% block page_title %}Appointments{% endblock %}
 {% block content %}
-<div class="container mt-4">
-    <h2>My Appointments</h2>
-    <div class="table-responsive">
-        <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th>Date</th>
-                    <th>Patient Name</th>
-                    <th>Status</th>
-                    <th>Notes</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for appointment in appointments %}
-                <tr>
-                    <td>{{ appointment.date }}</td>
-                    <td>{{ appointment.patient.name }}</td>
-                    <td>{{ appointment.status }}</td>
-                    <td>
-                        {% if appointment.notes %}
-                            {{ appointment.notes }}
-                        {% else %}
-                            <em>No notes</em>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if appointment.status != 'Completed' and appointment.status != 'Cancelled' %}
-                        <form action="{{ url_for('doctor.update_appointment_status', appointment_id=appointment.id) }}" method="POST" class="d-inline">
-                            <div class="input-group">
-                                <select name="status" class="form-select form-select-sm" required>
-                                    <option value="">Change status</option>
-                                    <option value="Confirmed">Confirm</option>
-                                    <option value="Completed">Complete</option>
-                                    <option value="Cancelled">Cancel</option>
-                                </select>
-                                <input type="text" name="notes" class="form-control form-control-sm" placeholder="Add notes">
-                                <button type="submit" class="btn btn-primary btn-sm">Update</button>
-                            </div>
-                        </form>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+<div class="page-header"><div><h2 class="page-title">My appointments</h2><p class="page-subtitle">Move each visit through a controlled workflow: Pending → Confirmed → Completed.</p></div></div>
+<div class="hms-filter-bar mb-3">{% for value,label in [('all','All'),('Pending','Needs action'),('Confirmed','Confirmed'),('Completed','Completed'),('Cancelled','Cancelled')] %}<a href="{{ url_for('doctor.view_appointments', status=value) }}" class="hms-filter-chip {% if status == value %}active{% endif %}">{{ label }}</a>{% endfor %}</div>
+{% if appointments %}
+<div class="hms-appointment-list">
+{% for a in appointments %}
+<article class="hms-appointment-card">
+  <div class="hms-appointment-main">
+    <div class="hms-date-tile"><strong>{{ a.date.strftime('%d') }}</strong><small>{{ a.date.strftime('%b') }}</small></div>
+    <div class="flex-grow-1"><div class="d-flex flex-wrap gap-2 align-items-center mb-1"><h3>{{ a.patient.name if a.patient else 'Patient' }}</h3><span class="badge {% if a.status == 'Pending' %}bg-warning{% elif a.status == 'Confirmed' %}bg-success{% elif a.status == 'Cancelled' %}bg-danger{% else %}bg-primary{% endif %}">{{ a.status }}</span></div><p><i class="bi bi-clock me-1"></i>{{ a.date.strftime('%I:%M %p') }} &nbsp;·&nbsp; {{ a.reason }}</p>{% if a.notes %}<small class="hms-note"><i class="bi bi-journal-text me-1"></i>{{ a.notes }}</small>{% endif %}</div>
+  </div>
+  {% if a.status in ['Pending','Confirmed'] %}
+  <form action="{{ url_for('doctor.update_appointment_status', appointment_id=a.id) }}" method="POST" class="hms-appointment-actions">
+    <input type="text" name="notes" class="form-control form-control-sm" placeholder="Optional clinical/admin note" value="{{ a.notes or '' }}">
+    <div class="d-flex gap-2 flex-wrap">
+      {% if a.status == 'Pending' %}<button name="status" value="Confirmed" class="btn btn-success btn-sm"><i class="bi bi-check2 me-1"></i>Confirm</button>{% endif %}
+      {% if a.status == 'Confirmed' %}<button name="status" value="Completed" class="btn btn-primary btn-sm"><i class="bi bi-check2-circle me-1"></i>Complete</button>{% endif %}
+      <button name="status" value="Cancelled" class="btn btn-outline-danger btn-sm" onclick="return confirm('Cancel this appointment?')"><i class="bi bi-x-circle me-1"></i>Cancel</button>
     </div>
-
-    {% if not appointments %}
-    <div class="alert alert-info">
-        No appointments found.
-    </div>
-    {% endif %}
+  </form>
+  {% endif %}
+</article>
+{% endfor %}
 </div>
+{% else %}<div class="hms-empty"><i class="bi bi-calendar2-check"></i><p>No appointments match this filter.</p></div>{% endif %}
 {% endblock %}

@@ -1,75 +1,17 @@
 {% extends 'layout.html' %}
-
 {% block title %}Availability{% endblock %}
 {% block page_title %}Availability{% endblock %}
 {% block content %}
-<div class="container mt-4">
-  <h2>Manage Your Availability</h2>
-
-  <div class="card mt-4 mb-4">
-    <div class="card-body">
-      <h5 class="card-title">Set Your Availability</h5>
-      <form method="POST" class="mt-3">
-        <div class="form-row">
-          <div class="form-group col-md-4">
-            <label for="date">Date</label>
-            <input type="date" class="form-control" id="date" name="date" required>
-            <small class="form-text text-muted">Within the next 7 days</small>
-          </div>
-          <div class="form-group col-md-3">
-            <label for="start_time">Start Time</label>
-            <input type="time" class="form-control" id="start_time" name="start_time" required>
-          </div>
-          <div class="form-group col-md-3">
-            <label for="end_time">End Time</label>
-            <input type="time" class="form-control" id="end_time" name="end_time" required>
-          </div>
-          <div class="form-group col-md-2 pt-4">
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="is_available" name="is_available" checked>
-              <label class="form-check-label" for="is_available">
-                Available
-              </label>
-            </div>
-          </div>
-        </div>
-        <button type="submit" class="btn btn-primary">Add/Update Availability</button>
-      </form>
-    </div>
-  </div>
-
-  <h3>Your Availability Schedule</h3>
-  {% if availabilities %}
-  <div class="table-responsive">
-    <table class="table table-bordered table-striped">
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Start Time</th>
-          <th>End Time</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for avail in availabilities %}
-        <tr>
-          <td>{{ avail.date.strftime('%Y-%m-%d') }}</td>
-          <td>{{ avail.start_time }}</td>
-          <td>{{ avail.end_time }}</td>
-          <td>
-            {% if avail.is_available %}
-              <span class="badge badge-success">Available</span>
-            {% else %}
-              <span class="badge badge-danger">Not Available</span>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}
-  <div class="alert alert-info">No availability set yet. Set your availability for the next 7 days above.</div>
-  {% endif %}
+<div class="page-header"><div><h2 class="page-title">Availability schedule</h2><p class="page-subtitle">Publish 30-minute bookable windows or block time during the next 14 days.</p></div></div>
+<div class="row g-4">
+  <div class="col-xl-5"><div class="hms-panel"><div class="hms-panel-head"><div><span class="hms-kicker">New window</span><h3>Set availability</h3></div><i class="bi bi-calendar2-plus"></i></div><form method="POST">
+    <div class="mb-3"><label for="date" class="form-label">Date</label><input type="date" class="form-control" id="date" name="date" required min="{{ today.isoformat() }}" max="{{ max_date.isoformat() }}"></div>
+    <div class="row g-3 mb-3"><div class="col-6"><label for="start_time" class="form-label">Start time</label><input type="time" class="form-control" id="start_time" name="start_time" step="1800" required></div><div class="col-6"><label for="end_time" class="form-label">End time</label><input type="time" class="form-control" id="end_time" name="end_time" step="1800" required></div></div>
+    <div class="hms-toggle-box mb-3"><div><strong>Open for bookings</strong><small>Turn this off to block this time range instead.</small></div><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="is_available" name="is_available" checked></div></div>
+    <button type="submit" class="btn btn-primary w-100"><i class="bi bi-plus-lg me-1"></i>Add schedule window</button>
+  </form></div></div>
+  <div class="col-xl-7"><div class="hms-panel"><div class="hms-panel-head"><div><span class="hms-kicker">Next 14 days</span><h3>Published schedule</h3></div><i class="bi bi-clock-history"></i></div>
+    {% if availabilities %}<div class="hms-availability-list">{% for avail in availabilities %}<div class="hms-availability-row"><div class="hms-date-tile"><strong>{{ avail.date.strftime('%d') }}</strong><small>{{ avail.date.strftime('%b') }}</small></div><div class="flex-grow-1"><strong>{{ avail.start_time }} – {{ avail.end_time }}</strong><small>{% set booked = booked_by_date.get(avail.date.isoformat(), []) %}{{ booked|length }} active booking{{ '' if booked|length == 1 else 's' }} on this date</small></div><span class="badge {% if avail.is_available %}bg-success{% else %}bg-danger{% endif %}">{% if avail.is_available %}Bookable{% else %}Blocked{% endif %}</span><form method="POST" action="{{ url_for('doctor.delete_availability', availability_id=avail.id) }}"><button class="btn btn-sm btn-outline-danger" title="Remove window" onclick="return confirm('Remove this schedule window?')"><i class="bi bi-trash3"></i></button></form></div>{% endfor %}</div>{% else %}<div class="hms-empty"><i class="bi bi-calendar2-plus"></i><p>No schedule published yet.</p><small>Add a bookable window so patients can see free appointment slots.</small></div>{% endif %}
+  </div></div>
 </div>
 {% endblock %}

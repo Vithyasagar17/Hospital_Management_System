@@ -3,6 +3,7 @@ from flask_login import login_required
 from app import db
 from app.models import Doctor, Patient, Appointment, Specialization, User
 from app.routes.auth_decorator import role_required
+from datetime import datetime, timedelta
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -10,10 +11,47 @@ admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 @login_required
 @role_required('Admin')
 def admin_dashboard():
+    today = datetime.now().date()
+    tomorrow = today + timedelta(days=1)
+    week_start = today - timedelta(days=6)
+
     total_doctors = Doctor.query.filter_by(is_blacklisted=False).count()
     total_patients = Patient.query.filter_by(is_blacklisted=False).count()
     total_appointments = Appointment.query.count()
-    return render_template('admin_dashboard.html',total_doctors=total_doctors,total_patients=total_patients,total_appointments=total_appointments)
+    appointments_today = Appointment.query.filter(
+        Appointment.date >= datetime.combine(today, datetime.min.time()),
+        Appointment.date < datetime.combine(tomorrow, datetime.min.time())
+    ).count()
+
+    status_counts = {
+        status: Appointment.query.filter_by(status=status).count()
+        for status in ['Pending', 'Confirmed', 'Completed', 'Cancelled']
+    }
+
+    recent_appointments = Appointment.query.order_by(Appointment.created_at.desc()).limit(6).all()
+    week_appointments = Appointment.query.filter(
+        Appointment.date >= datetime.combine(week_start, datetime.min.time()),
+        Appointment.date < datetime.combine(tomorrow, datetime.min.time())
+    ).all()
+
+    chart_labels = []
+    chart_values = []
+    for offset in range(7):
+        day = week_start + timedelta(days=offset)
+        chart_labels.append(day.strftime('%a'))
+        chart_values.append(sum(1 for appt in week_appointments if appt.date and appt.date.date() == day))
+
+    return render_template(
+        'admin_dashboard.html',
+        total_doctors=total_doctors,
+        total_patients=total_patients,
+        total_appointments=total_appointments,
+        appointments_today=appointments_today,
+        status_counts=status_counts,
+        recent_appointments=recent_appointments,
+        chart_labels=chart_labels,
+        chart_values=chart_values,
+    )
 
 
 @admin_bp.route('/overview')
@@ -43,40 +81,40 @@ def admin_doctors():
 @role_required('Admin')
 def add_doctor():
     specializations = Specialization.query.all()
-    
+
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '').strip()
         name = request.form.get('name', '').strip()
         specialization_id = request.form.get('specialization_id')
-        
+
         if not username or not password or not name:
             flash('Username, password, and name are required.', 'warning')
             return redirect(url_for('admin.add_doctor'))
-        
+
         if User.query.filter_by(username=username).first():
             flash('Username already exists.', 'warning')
             return redirect(url_for('admin.add_doctor'))
-        
+
         try:
             spec_id = int(specialization_id) if specialization_id else None
         except ValueError:
             spec_id = None
-        
+
         # Create user
         user = User(username=username, role='Doctor')
         user.set_password(password)
         db.session.add(user)
         db.session.commit()
-        
+
         # Create doctor profile
         doctor = Doctor(id=user.id, name=name, specialization_id=spec_id)
         db.session.add(doctor)
         db.session.commit()
-        
+
         flash(f'Doctor {name} added successfully with username: {username}', 'success')
         return redirect(url_for('admin.admin_doctors'))
-    
+
     return render_template('admin_add_doctor.html', specializations=specializations)
 
 
@@ -96,8 +134,12 @@ def admin_patients():
 @login_required
 @role_required('Admin')
 def admin_appointments():
-    appointments = Appointment.query.order_by(Appointment.date.desc()).all()
-    return render_template('admin_appointments.html', appointments=appointments)
+    status = request.args.get('status', 'all')
+    query = Appointment.query
+    if status in {'Pending', 'Confirmed', 'Completed', 'Cancelled'}:
+        query = query.filter_by(status=status)
+    appointments = query.order_by(Appointment.date.desc()).all()
+    return render_template('admin_appointments.html', appointments=appointments, status=status)
 
 
 @admin_bp.route('/search')
@@ -106,9 +148,9 @@ def admin_appointments():
 def search():
     query = request.args.get('q', '').strip()
     search_type = request.args.get('type', 'all')
-    
+
     results = {'doctors': [], 'patients': []}
-    
+
     if query:
         if search_type in ['all', 'doctor']:
             # Search by doctor name or specialization
@@ -116,7 +158,7 @@ def search():
                 (Doctor.name.ilike(f'%{query}%')) |
                 (Doctor.specialization.has(Specialization.name.ilike(f'%{query}%')))
             ).filter_by(is_blacklisted=False).all()
-        
+
         if search_type in ['all', 'patient']:
             # Search by patient name, ID, or contact
             results['patients'] = Patient.query.filter(
@@ -124,7 +166,7 @@ def search():
                 (Patient.contact.ilike(f'%{query}%')) |
                 (Patient.id == int(query) if query.isdigit() else False)
             ).filter_by(is_blacklisted=False).all()
-    
+
     return render_template('admin_search.html', results=results, query=query, search_type=search_type)
 
 
@@ -134,25 +176,25 @@ def search():
 def edit_doctor(doctor_id):
     doctor = Doctor.query.get_or_404(doctor_id)
     specializations = Specialization.query.all()
-    
+
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
         specialization_id = request.form.get('specialization_id')
-        
+
         if not name:
             flash('Doctor name is required.', 'warning')
             return redirect(url_for('admin.edit_doctor', doctor_id=doctor_id))
-        
+
         doctor.name = name
         try:
             doctor.specialization_id = int(specialization_id) if specialization_id else None
         except ValueError:
             doctor.specialization_id = None
-        
+
         db.session.commit()
         flash(f'Doctor {name} updated successfully.', 'success')
         return redirect(url_for('admin.admin_doctors'))
-    
+
     return render_template('admin_edit_doctor.html', doctor=doctor, specializations=specializations)
 
 
@@ -161,7 +203,7 @@ def edit_doctor(doctor_id):
 @role_required('Admin')
 def edit_patient(patient_id):
     patient = Patient.query.get_or_404(patient_id)
-    
+
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
         contact = request.form.get('contact', '').strip()
@@ -170,11 +212,11 @@ def edit_patient(patient_id):
         gender = request.form.get('gender')
         height = request.form.get('height')
         weight = request.form.get('weight')
-        
+
         if not name:
             flash('Patient name is required.', 'warning')
             return redirect(url_for('admin.edit_patient', patient_id=patient_id))
-        
+
         patient.name = name
         patient.contact = contact or None
         patient.address = address or None
@@ -191,11 +233,11 @@ def edit_patient(patient_id):
             patient.weight = float(weight) if weight else None
         except ValueError:
             patient.weight = None
-        
+
         db.session.commit()
         flash(f'Patient {name} updated successfully.', 'success')
         return redirect(url_for('admin.admin_patients'))
-    
+
     return render_template('admin_edit_patient.html', patient=patient)
 
 

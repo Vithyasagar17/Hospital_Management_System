@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta
 from app import create_app, db
 from app.models import User, Specialization, Doctor, Patient, DoctorAvailability
 
@@ -8,14 +9,14 @@ with app.app_context():
     os.makedirs(app.instance_path, exist_ok=True)
 
     db_path = os.path.join(app.instance_path, 'hms.db')
-    
+
     if os.path.exists(db_path):
         os.remove(db_path)
-    
+
     db.create_all()
 
     from sqlalchemy import text
-    
+
     try:
         existing_appt_cols = {row[1] for row in db.session.execute(text("PRAGMA table_info('appointment')")).fetchall()}
     except Exception:
@@ -92,7 +93,7 @@ with app.app_context():
         if not Specialization.query.filter_by(name=spec_name).first():
             specialization = Specialization(name=spec_name, description=spec_desc)
             db.session.add(specialization)
-    
+
     db.session.commit()
 
     if not User.query.filter_by(username='dr_sample').first():
@@ -104,6 +105,25 @@ with app.app_context():
         gen_med = Specialization.query.filter_by(name='General Medicine').first()
         doctor = Doctor(id=doctor_user.id, name='Alice Smith', specialization_id=gen_med.id if gen_med else None)
         db.session.add(doctor)
+        db.session.commit()
+
+    # Seed demo booking windows for the sample doctor so the live-slot workflow
+    # is immediately usable after recreating the database.
+    sample_doctor_user = User.query.filter_by(username='dr_sample').first()
+    if sample_doctor_user:
+        start_day = datetime.now().date()
+        for offset in range(7):
+            day = start_day + timedelta(days=offset)
+            if day.weekday() == 6:  # Sunday
+                continue
+            for start_time, end_time in [('09:00', '12:00'), ('14:00', '17:00')]:
+                db.session.add(DoctorAvailability(
+                    doctor_id=sample_doctor_user.id,
+                    date=day,
+                    start_time=start_time,
+                    end_time=end_time,
+                    is_available=True
+                ))
         db.session.commit()
 
     if not User.query.filter_by(username='patient_sample').first():

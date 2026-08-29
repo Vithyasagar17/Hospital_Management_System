@@ -1,48 +1,14 @@
 {% extends 'layout.html' %}
-
 {% block title %}Appointments{% endblock %}
 {% block page_title %}Appointments{% endblock %}
 {% block content %}
-<div class="container mt-4">
-  <h2>Appointments</h2>
-
-  <div class="table-responsive mt-3">
-    <table class="table table-bordered table-striped">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Date</th>
-          <th>Time</th>
-          <th>Doctor</th>
-          <th>Patient</th>
-          <th>Age</th>
-          <th>Reason</th>
-          <th>Status</th>
-          <th>Notes</th>
-          <th>Created</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for a in appointments %}
-        <tr>
-          <td>{{ a.id }}</td>
-          <td>{{ a.date.strftime('%Y-%m-%d') if a.date else '—' }}</td>
-          <td>{{ a.time }}</td>
-          <td>Dr. {{ a.doctor.name if a.doctor else '—' }}</td>
-          <td>{{ a.patient.name if a.patient else '—' }}</td>
-          <td>{{ a.patient.age if a.patient and a.patient.age else '—' }}</td>
-          <td>{{ a.reason }}</td>
-          <td>{{ a.status }}</td>
-          <td>{{ a.notes or '—' }}</td>
-          <td>{{ a.created_at.strftime('%Y-%m-%d %H:%M') if a.created_at else '—' }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  {% if not appointments %}
-  <div class="alert alert-info">No appointments found.</div>
-  {% endif %}
+<div class="page-header"><div><h2 class="page-title">Hospital appointments</h2><p class="page-subtitle">Track the complete appointment workflow across all doctors and patients.</p></div></div>
+<div class="hms-filter-bar mb-3">
+  {% for value,label in [('all','All'),('Pending','Pending'),('Confirmed','Confirmed'),('Completed','Completed'),('Cancelled','Cancelled')] %}<a href="{{ url_for('admin.admin_appointments', status=value) }}" class="hms-filter-chip {% if status == value %}active{% endif %}">{{ label }}</a>{% endfor %}
 </div>
+{% if appointments %}
+<div class="table-responsive"><table class="table table-hover"><thead><tr><th>ID</th><th>Schedule</th><th>Doctor</th><th>Patient</th><th>Reason</th><th>Status</th><th>Notes</th></tr></thead><tbody>
+{% for a in appointments %}<tr><td>#{{ a.id }}</td><td><strong>{{ a.date.strftime('%d %b %Y') }}</strong><br><span class="text-muted">{{ a.date.strftime('%I:%M %p') }}</span></td><td>Dr. {{ a.doctor.name if a.doctor else '—' }}</td><td>{{ a.patient.name if a.patient else '—' }}</td><td>{{ a.reason|truncate(55) }}</td><td><span class="badge {% if a.status == 'Pending' %}bg-warning{% elif a.status == 'Confirmed' %}bg-success{% elif a.status == 'Cancelled' %}bg-danger{% else %}bg-primary{% endif %}">{{ a.status }}</span></td><td>{{ a.notes|truncate(48) if a.notes else '—' }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% else %}<div class="hms-empty"><i class="bi bi-calendar2-x"></i><p>No appointments match this status.</p></div>{% endif %}
 {% endblock %}
