@@ -58,7 +58,8 @@
       <div class="hms-quick-links">
         <a href="{{ url_for('admin.admin_doctors') }}"><span><i class="bi bi-person-badge"></i></span><div><strong>Doctors</strong><small>Manage medical staff</small></div><i class="bi bi-chevron-right"></i></a>
         <a href="{{ url_for('admin.admin_patients') }}"><span><i class="bi bi-people"></i></span><div><strong>Patients</strong><small>Maintain patient records</small></div><i class="bi bi-chevron-right"></i></a>
-        <a href="{{ url_for('admin.search') }}"><span><i class="bi bi-search"></i></span><div><strong>Search</strong><small>Find records quickly</small></div><i class="bi bi-chevron-right"></i></a>
+        <a href="{{ url_for('admin.search') }}"><span><i class="bi bi-search"></i></span><div><strong>Advanced search</strong><small>Filter every record type</small></div><i class="bi bi-chevron-right"></i></a>
+        <a href="{{ url_for('admin.audit_logs') }}"><span><i class="bi bi-shield-check"></i></span><div><strong>Audit logs</strong><small>{{ audit_24h }} events in the last 24h</small></div><i class="bi bi-chevron-right"></i></a>
         <a href="{{ url_for('admin.admin_overview') }}"><span><i class="bi bi-bar-chart-line"></i></span><div><strong>Overview</strong><small>Consolidated system data</small></div><i class="bi bi-chevron-right"></i></a>
       </div>
     </div>

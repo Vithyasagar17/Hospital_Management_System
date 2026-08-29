@@ -1,29 +1,7 @@
-{% extends 'layout.html' %}
-{% block title %}Appointments{% endblock %}
-{% block page_title %}Appointments{% endblock %}
+{% extends 'layout.html' %}{% block title %}Appointments{% endblock %}{% block page_title %}Appointments{% endblock %}
 {% block content %}
-<div class="page-header"><div><h2 class="page-title">My appointments</h2><p class="page-subtitle">Move each visit through a controlled workflow: Pending → Confirmed → Completed.</p></div></div>
-<div class="hms-filter-bar mb-3">{% for value,label in [('all','All'),('Pending','Needs action'),('Confirmed','Confirmed'),('Completed','Completed'),('Cancelled','Cancelled')] %}<a href="{{ url_for('doctor.view_appointments', status=value) }}" class="hms-filter-chip {% if status == value %}active{% endif %}">{{ label }}</a>{% endfor %}</div>
-{% if appointments %}
-<div class="hms-appointment-list">
-{% for a in appointments %}
-<article class="hms-appointment-card">
-  <div class="hms-appointment-main">
-    <div class="hms-date-tile"><strong>{{ a.date.strftime('%d') }}</strong><small>{{ a.date.strftime('%b') }}</small></div>
-    <div class="flex-grow-1"><div class="d-flex flex-wrap gap-2 align-items-center mb-1"><h3>{{ a.patient.name if a.patient else 'Patient' }}</h3><span class="badge {% if a.status == 'Pending' %}bg-warning{% elif a.status == 'Confirmed' %}bg-success{% elif a.status == 'Cancelled' %}bg-danger{% else %}bg-primary{% endif %}">{{ a.status }}</span></div><p><i class="bi bi-clock me-1"></i>{{ a.date.strftime('%I:%M %p') }} &nbsp;·&nbsp; {{ a.reason }}</p>{% if a.notes %}<small class="hms-note"><i class="bi bi-journal-text me-1"></i>{{ a.notes }}</small>{% endif %}</div>
-  </div>
-  {% if a.status in ['Pending','Confirmed'] %}
-  <form action="{{ url_for('doctor.update_appointment_status', appointment_id=a.id) }}" method="POST" class="hms-appointment-actions">
-    <input type="text" name="notes" class="form-control form-control-sm" placeholder="Optional clinical/admin note" value="{{ a.notes or '' }}">
-    <div class="d-flex gap-2 flex-wrap"><a href="{{ url_for('doctor.appointment_detail', appointment_id=a.id) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-eye me-1"></i>Details</a>
-      {% if a.status == 'Pending' %}<button name="status" value="Confirmed" class="btn btn-success btn-sm"><i class="bi bi-check2 me-1"></i>Confirm</button>{% endif %}
-      {% if a.status == 'Confirmed' %}<button name="status" value="Completed" class="btn btn-primary btn-sm"><i class="bi bi-check2-circle me-1"></i>Complete</button>{% endif %}
-      <button name="status" value="Cancelled" class="btn btn-outline-danger btn-sm" onclick="return confirm('Cancel this appointment?')"><i class="bi bi-x-circle me-1"></i>Cancel</button>
-    </div>
-  </form>
-  {% else %}<div><a href="{{ url_for('doctor.appointment_detail', appointment_id=a.id) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-eye me-1"></i>Details</a></div>{% endif %}
-</article>
-{% endfor %}
-</div>
-{% else %}<div class="hms-empty"><i class="bi bi-calendar2-check"></i><p>No appointments match this filter.</p></div>{% endif %}
+<div class="page-header"><div><span class="hms-kicker">Clinical schedule</span><h2 class="page-title">My appointments</h2><p class="page-subtitle">Filter by patient, reason, date, or workflow status.</p></div></div>
+<form method="GET" class="hms-filter-panel mb-4"><div class="row g-3 align-items-end"><div class="col-lg-4"><label class="form-label">Search</label><input class="form-control" name="q" value="{{ q }}" placeholder="Patient name or reason..."></div><div class="col-sm-4 col-lg-2"><label class="form-label">Status</label><select class="form-select" name="status"><option value="all">All</option>{% for s in ['Pending','Confirmed','Completed','Cancelled'] %}<option value="{{ s }}" {% if status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div><div class="col-sm-4 col-lg-2"><label class="form-label">From</label><input type="date" class="form-control" name="date_from" value="{{ date_from }}"></div><div class="col-sm-4 col-lg-2"><label class="form-label">To</label><input type="date" class="form-control" name="date_to" value="{{ date_to }}"></div><div class="col-lg-2 d-grid"><button class="btn btn-primary">Apply</button></div></div></form>
+<div class="hms-results-summary"><span><strong>{{ appointments|length }}</strong> visit{{ '' if appointments|length == 1 else 's' }} found</span>{% if q or status!='all' or date_from or date_to %}<a href="{{ url_for('doctor.view_appointments') }}">Clear filters</a>{% endif %}</div>
+{% if appointments %}<div class="hms-appointment-list">{% for a in appointments %}<article class="hms-appointment-card"><div class="hms-appointment-main"><div class="hms-date-tile"><strong>{{ a.date.strftime('%d') }}</strong><small>{{ a.date.strftime('%b') }}</small></div><div><div class="d-flex gap-2 align-items-center flex-wrap"><h3>{{ a.patient.name if a.patient else 'Patient' }}</h3><span class="badge {% if a.status=='Pending' %}bg-warning{% elif a.status=='Confirmed' %}bg-success{% elif a.status=='Cancelled' %}bg-danger{% else %}bg-primary{% endif %}">{{ a.status }}</span></div><p>{{ a.date.strftime('%I:%M %p') }} · {{ a.reason|truncate(85) }}</p>{% if a.notes %}<span class="hms-note">{{ a.notes|truncate(90) }}</span>{% endif %}</div></div><div class="hms-appointment-actions"><a href="{{ url_for('doctor.appointment_detail', appointment_id=a.id) }}" class="btn btn-sm btn-outline-primary">Open visit</a>{% if a.status == 'Pending' %}<form method="POST" action="{{ url_for('doctor.update_appointment_status', appointment_id=a.id) }}"><input type="hidden" name="status" value="Confirmed"><button class="btn btn-sm btn-success w-100">Confirm</button></form>{% elif a.status == 'Confirmed' %}<form method="POST" action="{{ url_for('doctor.update_appointment_status', appointment_id=a.id) }}"><input type="hidden" name="status" value="Completed"><button class="btn btn-sm btn-primary w-100">Complete</button></form>{% endif %}</div></article>{% endfor %}</div>{% else %}<div class="hms-empty"><i class="bi bi-calendar2-x"></i><p>No appointments match these filters.</p></div>{% endif %}
 {% endblock %}

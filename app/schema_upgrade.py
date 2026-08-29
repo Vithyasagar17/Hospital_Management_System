@@ -1,10 +1,9 @@
-"""Small SQLite compatibility upgrade for ZIP-based project versions.
+"""Small SQLite compatibility upgrades for ZIP-based project versions.
 
-The project intentionally keeps setup simple for coursework/demo use.  When an
-older bundled hms.db is opened, these additive columns are created in-place so
-Phase 2 works without deleting existing records or requiring a migration CLI.
+Existing Phase 1/2 databases are upgraded additively in place. If the database
+is missing entirely, the current SQLAlchemy model set is created instead.
 """
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 from app import db
 
 
@@ -14,6 +13,7 @@ def _columns(table_name):
 
 
 def ensure_phase2_schema():
+    inspector = inspect(db.engine)
     upgrades = {
         'prescription': {
             'advice': 'TEXT',
@@ -27,14 +27,28 @@ def ensure_phase2_schema():
     }
 
     for table_name, additions in upgrades.items():
-        try:
-            existing = _columns(table_name)
-        except Exception:
-            # Fresh databases will be created from the SQLAlchemy models.
+        if not inspector.has_table(table_name):
             continue
+        existing = _columns(table_name)
         for column, sql_type in additions.items():
             if column not in existing:
                 db.session.execute(text(
                     f"ALTER TABLE {table_name} ADD COLUMN {column} {sql_type}"
                 ))
     db.session.commit()
+
+
+def ensure_phase3_schema():
+    inspector = inspect(db.engine)
+    if not inspector.has_table('user'):
+        # Handles a first run where instance/hms.db was removed manually.
+        db.create_all()
+        return
+
+    ensure_phase2_schema()
+
+    # New Phase 3 features use entirely additive tables. SQLAlchemy can create
+    # only those missing tables without modifying any existing records.
+    from app.models import Notification, AuditLog
+    Notification.__table__.create(bind=db.engine, checkfirst=True)
+    AuditLog.__table__.create(bind=db.engine, checkfirst=True)

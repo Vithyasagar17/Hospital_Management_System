@@ -3,6 +3,8 @@ from flask_login import login_required, current_user
 from app.routes.auth_decorator import role_required
 from app.models import Doctor, Patient, Appointment, Prescription, PrescriptionItem, DoctorAvailability
 from app import db
+from sqlalchemy import or_
+from app.activity import log_activity, notify_user
 from datetime import datetime, timedelta
 
 
@@ -71,6 +73,7 @@ def doctor_profile():
             db.session.add(doctor)
 
         doctor.name = name
+        log_activity('doctor_profile_updated', f'Updated doctor profile for {name}.', 'Doctor', doctor.id)
         db.session.commit()
         return redirect(url_for('doctor.doctor_dashboard'))
 
@@ -81,8 +84,16 @@ def doctor_profile():
 @login_required
 @role_required('Doctor')
 def doctor_patients():
-    patients = Patient.query.order_by(Patient.name).all()
-    return render_template('doctor_patients.html', patients=patients)
+    q = request.args.get('q', '').strip()
+    query = Patient.query
+    if q:
+        query = query.filter(or_(
+            Patient.name.ilike(f'%{q}%'),
+            Patient.contact.ilike(f'%{q}%'),
+            Patient.address.ilike(f'%{q}%')
+        ))
+    patients = query.order_by(Patient.name).all()
+    return render_template('doctor_patients.html', patients=patients, q=q)
 
 
 @doctor_bp.route('/patient/<int:patient_id>')
@@ -99,11 +110,25 @@ def doctor_view_patient(patient_id):
 @role_required('Doctor')
 def view_appointments():
     status = request.args.get('status', 'all')
-    query = Appointment.query.filter_by(doctor_id=current_user.id)
+    q = request.args.get('q', '').strip()
+    date_from_raw = request.args.get('date_from', '')
+    date_to_raw = request.args.get('date_to', '')
+    query = Appointment.query.join(Patient, Appointment.patient_id == Patient.id).filter(Appointment.doctor_id == current_user.id)
     if status in {'Pending', 'Confirmed', 'Completed', 'Cancelled'}:
-        query = query.filter_by(status=status)
+        query = query.filter(Appointment.status == status)
+    if q:
+        query = query.filter(or_(Patient.name.ilike(f'%{q}%'), Appointment.reason.ilike(f'%{q}%')))
+    try:
+        if date_from_raw:
+            start = datetime.strptime(date_from_raw, '%Y-%m-%d')
+            query = query.filter(Appointment.date >= start)
+        if date_to_raw:
+            end = datetime.strptime(date_to_raw, '%Y-%m-%d') + timedelta(days=1)
+            query = query.filter(Appointment.date < end)
+    except ValueError:
+        flash('One of the date filters was invalid and has been ignored.', 'warning')
     appointments = query.order_by(Appointment.date.desc()).all()
-    return render_template('doctor_appointments.html', appointments=appointments, status=status)
+    return render_template('doctor_appointments.html', appointments=appointments, status=status, q=q, date_from=date_from_raw, date_to=date_to_raw)
 
 
 @doctor_bp.route('/appointment/<int:appointment_id>')
@@ -124,8 +149,21 @@ def appointment_detail(appointment_id):
 @login_required
 @role_required('Doctor')
 def prescriptions():
-    prescriptions = Prescription.query.join(Appointment).filter(Appointment.doctor_id == current_user.id).order_by(Prescription.created_at.desc()).all()
-    return render_template('doctor_prescriptions.html', prescriptions=prescriptions)
+    q = request.args.get('q', '').strip()
+    date_from_raw = request.args.get('date_from', '')
+    date_to_raw = request.args.get('date_to', '')
+    query = Prescription.query.join(Appointment).join(Patient, Appointment.patient_id == Patient.id).filter(Appointment.doctor_id == current_user.id)
+    if q:
+        query = query.filter(or_(Patient.name.ilike(f'%{q}%'), Prescription.diagnosis.ilike(f'%{q}%')))
+    try:
+        if date_from_raw:
+            query = query.filter(Prescription.created_at >= datetime.strptime(date_from_raw, '%Y-%m-%d'))
+        if date_to_raw:
+            query = query.filter(Prescription.created_at < datetime.strptime(date_to_raw, '%Y-%m-%d') + timedelta(days=1))
+    except ValueError:
+        flash('One of the date filters was invalid and has been ignored.', 'warning')
+    prescriptions = query.order_by(Prescription.created_at.desc()).all()
+    return render_template('doctor_prescriptions.html', prescriptions=prescriptions, q=q, date_from=date_from_raw, date_to=date_to_raw)
 
 
 @doctor_bp.route('/prescription/new', methods=['GET', 'POST'])
@@ -176,6 +214,10 @@ def new_prescription():
             follow_up_date=follow_up_date
         )
         db.session.add(prescription)
+        db.session.flush()
+        patient_name = appt.patient.name if appt.patient and appt.patient.name else 'Patient'
+        log_activity('prescription_created', f'Created prescription #{prescription.id} for {patient_name}.', 'Prescription', prescription.id)
+        notify_user(appt.patient_id, 'New prescription available', f'Dr. {appt.doctor.name if appt.doctor else current_user.username} created a prescription for your visit.', 'success', f'/patient/prescription/{prescription.id}')
         db.session.commit()
         flash('Prescription created. Add medicines below.', 'success')
         return redirect(url_for('doctor.prescription_detail', prescription_id=prescription.id))
@@ -214,6 +256,7 @@ def prescription_detail(prescription_id):
             frequency=frequency or None, duration=duration or None, quantity=qty, instructions=instructions or None
         )
         db.session.add(item)
+        log_activity('medicine_added', f'Added {item.medicine} to prescription #{prescription.id}.', 'Prescription', prescription.id)
         db.session.commit()
         return redirect(url_for('doctor.prescription_detail', prescription_id=prescription.id))
 
@@ -247,6 +290,7 @@ def edit_prescription(prescription_id):
     prescription.advice = advice or None
     prescription.follow_up_date = follow_up_date
     prescription.updated_at = datetime.utcnow()
+    log_activity('prescription_updated', f'Updated prescription #{prescription.id}.', 'Prescription', prescription.id)
     db.session.commit()
     flash('Prescription summary updated.', 'success')
     return redirect(url_for('doctor.prescription_detail', prescription_id=prescription.id))
@@ -261,7 +305,9 @@ def delete_medicine(item_id):
         abort(403)
 
     prescription_id = item.prescription_id
+    medicine_name = item.medicine
     db.session.delete(item)
+    log_activity('medicine_removed', f'Removed {medicine_name} from prescription #{prescription_id}.', 'Prescription', prescription_id)
     db.session.commit()
 
     return redirect(url_for('doctor.prescription_detail', prescription_id=prescription_id))
@@ -275,7 +321,9 @@ def delete_prescription(prescription_id):
     if prescription.appointment.doctor_id != current_user.id:
         abort(403)
 
+    appointment_id = prescription.appointment_id
     db.session.delete(prescription)
+    log_activity('prescription_deleted', f'Deleted prescription #{prescription_id} for appointment #{appointment_id}.', 'Appointment', appointment_id)
     db.session.commit()
     return redirect(url_for('doctor.prescriptions'))
 
@@ -303,10 +351,14 @@ def update_appointment_status(appointment_id):
         flash('Invalid status transition.', 'error')
         return redirect(url_for('doctor.view_appointments'))
 
+    previous_status = appointment.status
     appointment.status = status
     if notes:
         appointment.notes = notes
     appointment.updated_at = datetime.utcnow()
+    doctor_name = appointment.doctor.name if appointment.doctor else current_user.username
+    log_activity('appointment_status_changed', f'Appointment #{appointment.id}: {previous_status} → {status}.', 'Appointment', appointment.id)
+    notify_user(appointment.patient_id, f'Appointment {status.lower()}', f'Dr. {doctor_name} marked your appointment on {appointment.date.strftime("%d %b %Y at %I:%M %p")} as {status.lower()}.', 'success' if status in ['Confirmed', 'Completed'] else 'warning', f'/patient/appointment/{appointment.id}')
     db.session.commit()
 
     flash(f'Appointment marked as {status.lower()}.', 'success')
@@ -322,6 +374,7 @@ def update_appointment_notes(appointment_id):
         abort(403)
     appointment.notes = request.form.get('notes', '').strip() or None
     appointment.updated_at = datetime.utcnow()
+    log_activity('consultation_notes_updated', f'Updated consultation notes for appointment #{appointment.id}.', 'Appointment', appointment.id)
     db.session.commit()
     flash('Consultation notes saved.', 'success')
     return redirect(url_for('doctor.appointment_detail', appointment_id=appointment.id))
@@ -375,6 +428,7 @@ def manage_availability():
                 )
                 db.session.add(availability)
 
+            log_activity('availability_updated', f'Updated availability for {date.isoformat()} {start_time}–{end_time} ({"bookable" if is_available else "blocked"}).', 'DoctorAvailability', availability.id)
             db.session.commit()
             flash('Availability updated successfully.', 'success')
 
@@ -417,7 +471,9 @@ def delete_availability(availability_id):
     availability = DoctorAvailability.query.get_or_404(availability_id)
     if availability.doctor_id != current_user.id:
         abort(403)
+    description = f'Removed availability on {availability.date.isoformat()} {availability.start_time}–{availability.end_time}.'
     db.session.delete(availability)
+    log_activity('availability_removed', description, 'DoctorAvailability', availability_id)
     db.session.commit()
     flash('Availability window removed.', 'success')
     return redirect(url_for('doctor.manage_availability'))

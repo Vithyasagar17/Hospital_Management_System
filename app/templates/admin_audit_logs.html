@@ -1,0 +1,19 @@
+{% extends 'layout.html' %}
+{% block title %}Audit logs{% endblock %}
+{% block page_title %}Audit logs{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="hms-kicker">Security & accountability</span><h2 class="page-title">System audit trail</h2><p class="page-subtitle">See who changed what and when across Medora HMS. Showing up to 250 latest matching events.</p></div></div>
+<form method="GET" class="hms-filter-panel mb-4">
+  <div class="row g-3 align-items-end">
+    <div class="col-lg-4"><label class="form-label">Search activity</label><input class="form-control" name="q" value="{{ q }}" placeholder="User, action description, entity..."></div>
+    <div class="col-sm-6 col-lg-2"><label class="form-label">Role</label><select class="form-select" name="role"><option value="all">All roles</option>{% for r in ['Admin','Doctor','Patient','System'] %}<option value="{{ r }}" {% if role == r %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></div>
+    <div class="col-sm-6 col-lg-2"><label class="form-label">Action</label><select class="form-select" name="action"><option value="all">All actions</option>{% for a in actions %}<option value="{{ a }}" {% if action == a %}selected{% endif %}>{{ a|replace('_',' ')|title }}</option>{% endfor %}</select></div>
+    <div class="col-sm-6 col-lg-2"><label class="form-label">From</label><input type="date" class="form-control" name="date_from" value="{{ date_from }}"></div>
+    <div class="col-sm-6 col-lg-2"><label class="form-label">To</label><input type="date" class="form-control" name="date_to" value="{{ date_to }}"></div>
+    <div class="col-12 d-flex gap-2"><button class="btn btn-primary"><i class="bi bi-funnel me-1"></i> Apply filters</button><a class="btn btn-outline-secondary" href="{{ url_for('admin.audit_logs') }}">Reset</a></div>
+  </div>
+</form>
+{% if logs %}<div class="table-responsive"><table class="table table-hover"><thead><tr><th>Time</th><th>Actor</th><th>Role</th><th>Action</th><th>Entity</th><th>Description</th></tr></thead><tbody>
+{% for log in logs %}<tr><td class="text-nowrap">{{ log.created_at.strftime('%d %b %Y') }}<br><span class="text-muted">{{ log.created_at.strftime('%I:%M %p') }}</span></td><td><strong>{{ log.actor_username }}</strong></td><td><span class="badge bg-secondary">{{ log.actor_role }}</span></td><td><span class="hms-code-pill">{{ log.action|replace('_',' ') }}</span></td><td>{% if log.entity_type %}{{ log.entity_type }}{% if log.entity_id %} #{{ log.entity_id }}{% endif %}{% else %}—{% endif %}</td><td>{{ log.description }}</td></tr>{% endfor %}
+</tbody></table></div>{% else %}<div class="hms-empty"><i class="bi bi-shield-check"></i><p>No audit events match these filters.</p></div>{% endif %}
+{% endblock %}

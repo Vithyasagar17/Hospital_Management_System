@@ -37,8 +37,21 @@ def create_app():
 
     # Keep older bundled SQLite databases compatible with additive Phase 2 fields.
     with app.app_context():
-        from app.schema_upgrade import ensure_phase2_schema
-        ensure_phase2_schema()
+        from app.schema_upgrade import ensure_phase3_schema
+        ensure_phase3_schema()
+
+
+    @app.context_processor
+    def inject_phase3_navigation():
+        from flask_login import current_user
+        from app.models import Notification
+        if not getattr(current_user, 'is_authenticated', False):
+            return {'nav_notifications': [], 'unread_notification_count': 0}
+        base = Notification.query.filter_by(user_id=current_user.id)
+        return {
+            'nav_notifications': base.order_by(Notification.created_at.desc()).limit(5).all(),
+            'unread_notification_count': base.filter_by(is_read=False).count(),
+        }
 
     return app
 

@@ -1,65 +1,9 @@
 {% extends 'layout.html' %}
-
-{% block title %}Doctors{% endblock %}
-{% block page_title %}Doctors{% endblock %}
+{% block title %}Doctors{% endblock %}{% block page_title %}Doctors{% endblock %}
 {% block content %}
-<div class="container mt-4">
-  <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>Manage Doctors</h2>
-    <a href="{{ url_for('admin.add_doctor') }}" class="btn btn-success">+ Add Doctor</a>
-  </div>
-
-  <ul class="nav nav-tabs mb-3" role="tablist">
-    <li class="nav-item" role="presentation">
-      <a class="nav-link {% if status == 'active' %}active{% endif %}" href="{{ url_for('admin.admin_doctors', status='active') }}">
-        Active Doctors
-      </a>
-    </li>
-    <li class="nav-item" role="presentation">
-      <a class="nav-link {% if status == 'blacklisted' %}active{% endif %}" href="{{ url_for('admin.admin_doctors', status='blacklisted') }}">
-        Blacklisted Doctors
-      </a>
-    </li>
-  </ul>
-
-  <div class="table-responsive mt-3">
-    <table class="table table-bordered table-striped">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Name</th>
-          <th>Specialization</th>
-          <th>Username</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for d in doctors %}
-        <tr>
-          <td>{{ d.id }}</td>
-          <td>{{ d.name or '—' }}</td>
-          <td>{{ d.specialization.name if d.specialization else '—' }}</td>
-          <td>{{ d.id }}</td>
-          <td>
-            {% if status == 'active' %}
-              <a href="{{ url_for('admin.edit_doctor', doctor_id=d.id) }}" class="btn btn-sm btn-warning">Edit</a>
-              <form method="POST" action="{{ url_for('admin.blacklist_doctor', doctor_id=d.id) }}" style="display:inline;">
-                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Blacklist this doctor?')">Blacklist</button>
-              </form>
-            {% else %}
-              <form method="POST" action="{{ url_for('admin.unblacklist_doctor', doctor_id=d.id) }}" style="display:inline;">
-                <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Unblacklist this doctor?')">Unblacklist</button>
-              </form>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  {% if not doctors %}
-  <div class="alert alert-info">No {% if status == 'blacklisted' %}blacklisted{% else %}active{% endif %} doctors found.</div>
-  {% endif %}
-</div>
+<div class="page-header"><div><span class="hms-kicker">Directory</span><h2 class="page-title">Manage doctors</h2><p class="page-subtitle">Search, filter, update, and control doctor access.</p></div><a href="{{ url_for('admin.add_doctor') }}" class="btn btn-primary"><i class="bi bi-person-plus me-1"></i> Add doctor</a></div>
+<form method="GET" class="hms-filter-panel mb-4"><input type="hidden" name="status" value="{{ status }}"><div class="row g-3 align-items-end"><div class="col-lg-6"><label class="form-label">Doctor name</label><input name="q" class="form-control" value="{{ q }}" placeholder="Search by doctor name..."></div><div class="col-lg-4"><label class="form-label">Specialization</label><select class="form-select" name="specialization_id"><option value="">All specializations</option>{% for s in specializations %}<option value="{{ s.id }}" {% if specialization_id == s.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></div><div class="col-lg-2 d-grid"><button class="btn btn-primary"><i class="bi bi-funnel me-1"></i> Filter</button></div></div></form>
+<div class="hms-filter-bar mb-3"><a class="hms-filter-chip {% if status == 'active' %}active{% endif %}" href="{{ url_for('admin.admin_doctors', status='active', q=q, specialization_id=specialization_id or '') }}">Active</a><a class="hms-filter-chip {% if status == 'blacklisted' %}active{% endif %}" href="{{ url_for('admin.admin_doctors', status='blacklisted', q=q, specialization_id=specialization_id or '') }}">Blacklisted</a></div>
+<div class="hms-results-summary"><span><strong>{{ doctors|length }}</strong> doctor{{ '' if doctors|length == 1 else 's' }} found</span>{% if q or specialization_id %}<a href="{{ url_for('admin.admin_doctors', status=status) }}">Clear filters</a>{% endif %}</div>
+{% if doctors %}<div class="table-responsive"><table class="table table-hover"><thead><tr><th>ID</th><th>Doctor</th><th>Specialization</th><th>Account</th><th>Actions</th></tr></thead><tbody>{% for d in doctors %}<tr><td>#{{ d.id }}</td><td><strong>{{ d.name or '—' }}</strong></td><td>{{ d.specialization.name if d.specialization else '—' }}</td><td><span class="badge {% if d.is_blacklisted %}bg-danger{% else %}bg-success{% endif %}">{{ 'Blacklisted' if d.is_blacklisted else 'Active' }}</span></td><td>{% if status == 'active' %}<a href="{{ url_for('admin.edit_doctor', doctor_id=d.id) }}" class="btn btn-sm btn-outline-primary">Edit</a> <form class="d-inline" method="POST" action="{{ url_for('admin.blacklist_doctor', doctor_id=d.id) }}"><button class="btn btn-sm btn-outline-danger" onclick="return confirm('Blacklist this doctor?')">Blacklist</button></form>{% else %}<form class="d-inline" method="POST" action="{{ url_for('admin.unblacklist_doctor', doctor_id=d.id) }}"><button class="btn btn-sm btn-success">Restore</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="hms-empty"><i class="bi bi-person-x"></i><p>No doctors match these filters.</p></div>{% endif %}
 {% endblock %}

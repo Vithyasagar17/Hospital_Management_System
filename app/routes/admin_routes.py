@@ -1,11 +1,23 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
-from flask_login import login_required
+from flask_login import login_required, current_user
+from sqlalchemy import or_
 from app import db
-from app.models import Doctor, Patient, Appointment, Specialization, User
+from app.models import Doctor, Patient, Appointment, Specialization, User, AuditLog
 from app.routes.auth_decorator import role_required
+from app.activity import log_activity, notify_user
 from datetime import datetime, timedelta
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
+
+
+def _parse_date(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
 
 @admin_bp.route('/dashboard')
 @login_required
@@ -29,6 +41,8 @@ def admin_dashboard():
     }
 
     recent_appointments = Appointment.query.order_by(Appointment.created_at.desc()).limit(6).all()
+    recent_audit = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(6).all()
+    audit_24h = AuditLog.query.filter(AuditLog.created_at >= datetime.utcnow() - timedelta(hours=24)).count()
     week_appointments = Appointment.query.filter(
         Appointment.date >= datetime.combine(week_start, datetime.min.time()),
         Appointment.date < datetime.combine(tomorrow, datetime.min.time())
@@ -49,6 +63,8 @@ def admin_dashboard():
         appointments_today=appointments_today,
         status_counts=status_counts,
         recent_appointments=recent_appointments,
+        recent_audit=recent_audit,
+        audit_24h=audit_24h,
         chart_labels=chart_labels,
         chart_values=chart_values,
     )
@@ -69,18 +85,26 @@ def admin_overview():
 @role_required('Admin')
 def admin_doctors():
     status = request.args.get('status', 'active')
-    if status == 'blacklisted':
-        doctors = Doctor.query.filter_by(is_blacklisted=True).order_by(Doctor.name).all()
-    else:
-        doctors = Doctor.query.filter_by(is_blacklisted=False).order_by(Doctor.name).all()
-    return render_template('admin_doctors.html', doctors=doctors, status=status)
+    q = request.args.get('q', '').strip()
+    specialization_id = request.args.get('specialization_id', type=int)
+
+    query = Doctor.query
+    query = query.filter(Doctor.is_blacklisted.is_(status == 'blacklisted'))
+    if q:
+        query = query.filter(Doctor.name.ilike(f'%{q}%'))
+    if specialization_id:
+        query = query.filter(Doctor.specialization_id == specialization_id)
+    doctors = query.order_by(Doctor.name).all()
+    specializations = Specialization.query.order_by(Specialization.name).all()
+    return render_template('admin_doctors.html', doctors=doctors, status=status, q=q,
+                           specialization_id=specialization_id, specializations=specializations)
 
 
 @admin_bp.route('/doctor/add', methods=['GET', 'POST'])
 @login_required
 @role_required('Admin')
 def add_doctor():
-    specializations = Specialization.query.all()
+    specializations = Specialization.query.order_by(Specialization.name).all()
 
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
@@ -91,7 +115,6 @@ def add_doctor():
         if not username or not password or not name:
             flash('Username, password, and name are required.', 'warning')
             return redirect(url_for('admin.add_doctor'))
-
         if User.query.filter_by(username=username).first():
             flash('Username already exists.', 'warning')
             return redirect(url_for('admin.add_doctor'))
@@ -101,15 +124,14 @@ def add_doctor():
         except ValueError:
             spec_id = None
 
-        # Create user
         user = User(username=username, role='Doctor')
         user.set_password(password)
         db.session.add(user)
-        db.session.commit()
-
-        # Create doctor profile
+        db.session.flush()
         doctor = Doctor(id=user.id, name=name, specialization_id=spec_id)
         db.session.add(doctor)
+        log_activity('doctor_created', f'Added doctor {name} ({username}).', 'Doctor', user.id)
+        notify_user(user.id, 'Doctor account created', 'Your doctor workspace is ready. Complete your profile and availability.', 'success', '/doctor/dashboard')
         db.session.commit()
 
         flash(f'Doctor {name} added successfully with username: {username}', 'success')
@@ -123,11 +145,24 @@ def add_doctor():
 @role_required('Admin')
 def admin_patients():
     status = request.args.get('status', 'active')
-    if status == 'blacklisted':
-        patients = Patient.query.filter_by(is_blacklisted=True).order_by(Patient.name).all()
-    else:
-        patients = Patient.query.filter_by(is_blacklisted=False).order_by(Patient.name).all()
-    return render_template('admin_patients.html', patients=patients, status=status)
+    q = request.args.get('q', '').strip()
+    min_age = request.args.get('min_age', type=int)
+    max_age = request.args.get('max_age', type=int)
+
+    query = Patient.query.filter(Patient.is_blacklisted.is_(status == 'blacklisted'))
+    if q:
+        query = query.filter(or_(
+            Patient.name.ilike(f'%{q}%'),
+            Patient.contact.ilike(f'%{q}%'),
+            Patient.address.ilike(f'%{q}%')
+        ))
+    if min_age is not None:
+        query = query.filter(Patient.age >= min_age)
+    if max_age is not None:
+        query = query.filter(Patient.age <= max_age)
+    patients = query.order_by(Patient.name).all()
+    return render_template('admin_patients.html', patients=patients, status=status, q=q,
+                           min_age=min_age, max_age=max_age)
 
 
 @admin_bp.route('/appointments')
@@ -135,39 +170,122 @@ def admin_patients():
 @role_required('Admin')
 def admin_appointments():
     status = request.args.get('status', 'all')
-    query = Appointment.query
+    q = request.args.get('q', '').strip()
+    date_from_raw = request.args.get('date_from', '')
+    date_to_raw = request.args.get('date_to', '')
+    date_from = _parse_date(date_from_raw)
+    date_to = _parse_date(date_to_raw)
+
+    query = Appointment.query.join(Doctor, Appointment.doctor_id == Doctor.id).join(Patient, Appointment.patient_id == Patient.id)
     if status in {'Pending', 'Confirmed', 'Completed', 'Cancelled'}:
-        query = query.filter_by(status=status)
+        query = query.filter(Appointment.status == status)
+    if q:
+        query = query.filter(or_(
+            Doctor.name.ilike(f'%{q}%'),
+            Patient.name.ilike(f'%{q}%'),
+            Appointment.reason.ilike(f'%{q}%')
+        ))
+    if date_from:
+        query = query.filter(Appointment.date >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        query = query.filter(Appointment.date < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
     appointments = query.order_by(Appointment.date.desc()).all()
-    return render_template('admin_appointments.html', appointments=appointments, status=status)
+    return render_template('admin_appointments.html', appointments=appointments, status=status, q=q,
+                           date_from=date_from_raw, date_to=date_to_raw)
 
 
 @admin_bp.route('/search')
 @login_required
 @role_required('Admin')
 def search():
-    query = request.args.get('q', '').strip()
+    q = request.args.get('q', '').strip()
     search_type = request.args.get('type', 'all')
+    status = request.args.get('status', 'all')
+    specialization_id = request.args.get('specialization_id', type=int)
+    date_from_raw = request.args.get('date_from', '')
+    date_to_raw = request.args.get('date_to', '')
+    date_from = _parse_date(date_from_raw)
+    date_to = _parse_date(date_to_raw)
 
-    results = {'doctors': [], 'patients': []}
+    results = {'doctors': [], 'patients': [], 'appointments': []}
 
-    if query:
-        if search_type in ['all', 'doctor']:
-            # Search by doctor name or specialization
-            results['doctors'] = Doctor.query.filter(
-                (Doctor.name.ilike(f'%{query}%')) |
-                (Doctor.specialization.has(Specialization.name.ilike(f'%{query}%')))
-            ).filter_by(is_blacklisted=False).all()
+    if search_type in ['all', 'doctor']:
+        dq = Doctor.query
+        if q:
+            dq = dq.filter(or_(Doctor.name.ilike(f'%{q}%'), Doctor.specialization.has(Specialization.name.ilike(f'%{q}%'))))
+        if specialization_id:
+            dq = dq.filter(Doctor.specialization_id == specialization_id)
+        if status == 'active':
+            dq = dq.filter(Doctor.is_blacklisted.is_(False))
+        elif status == 'blacklisted':
+            dq = dq.filter(Doctor.is_blacklisted.is_(True))
+        results['doctors'] = dq.order_by(Doctor.name).limit(100).all()
 
-        if search_type in ['all', 'patient']:
-            # Search by patient name, ID, or contact
-            results['patients'] = Patient.query.filter(
-                (Patient.name.ilike(f'%{query}%')) |
-                (Patient.contact.ilike(f'%{query}%')) |
-                (Patient.id == int(query) if query.isdigit() else False)
-            ).filter_by(is_blacklisted=False).all()
+    if search_type in ['all', 'patient']:
+        pq = Patient.query
+        if q:
+            clauses = [Patient.name.ilike(f'%{q}%'), Patient.contact.ilike(f'%{q}%'), Patient.address.ilike(f'%{q}%')]
+            if q.isdigit():
+                clauses.append(Patient.id == int(q))
+            pq = pq.filter(or_(*clauses))
+        if status == 'active':
+            pq = pq.filter(Patient.is_blacklisted.is_(False))
+        elif status == 'blacklisted':
+            pq = pq.filter(Patient.is_blacklisted.is_(True))
+        results['patients'] = pq.order_by(Patient.name).limit(100).all()
 
-    return render_template('admin_search.html', results=results, query=query, search_type=search_type)
+    if search_type in ['all', 'appointment']:
+        aq = Appointment.query.join(Doctor, Appointment.doctor_id == Doctor.id).join(Patient, Appointment.patient_id == Patient.id)
+        if q:
+            aq = aq.filter(or_(Doctor.name.ilike(f'%{q}%'), Patient.name.ilike(f'%{q}%'), Appointment.reason.ilike(f'%{q}%')))
+        if status in {'Pending', 'Confirmed', 'Completed', 'Cancelled'}:
+            aq = aq.filter(Appointment.status == status)
+        if date_from:
+            aq = aq.filter(Appointment.date >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            aq = aq.filter(Appointment.date < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+        results['appointments'] = aq.order_by(Appointment.date.desc()).limit(100).all()
+
+    specializations = Specialization.query.order_by(Specialization.name).all()
+    filters_active = bool(q or search_type != 'all' or status != 'all' or specialization_id or date_from_raw or date_to_raw)
+    return render_template('admin_search.html', results=results, query=q, search_type=search_type,
+                           status=status, specialization_id=specialization_id,
+                           date_from=date_from_raw, date_to=date_to_raw,
+                           specializations=specializations, filters_active=filters_active)
+
+
+@admin_bp.route('/audit-logs')
+@login_required
+@role_required('Admin')
+def audit_logs():
+    q = request.args.get('q', '').strip()
+    role = request.args.get('role', 'all')
+    action = request.args.get('action', 'all')
+    date_from_raw = request.args.get('date_from', '')
+    date_to_raw = request.args.get('date_to', '')
+    date_from = _parse_date(date_from_raw)
+    date_to = _parse_date(date_to_raw)
+
+    query = AuditLog.query
+    if q:
+        query = query.filter(or_(
+            AuditLog.actor_username.ilike(f'%{q}%'),
+            AuditLog.description.ilike(f'%{q}%'),
+            AuditLog.entity_type.ilike(f'%{q}%')
+        ))
+    if role in {'Admin', 'Doctor', 'Patient', 'System'}:
+        query = query.filter(AuditLog.actor_role == role)
+    if action != 'all':
+        query = query.filter(AuditLog.action == action)
+    if date_from:
+        query = query.filter(AuditLog.created_at >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        query = query.filter(AuditLog.created_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+
+    logs = query.order_by(AuditLog.created_at.desc()).limit(250).all()
+    actions = [row[0] for row in db.session.query(AuditLog.action).distinct().order_by(AuditLog.action).all()]
+    return render_template('admin_audit_logs.html', logs=logs, q=q, role=role, action=action,
+                           date_from=date_from_raw, date_to=date_to_raw, actions=actions)
 
 
 @admin_bp.route('/doctor/<int:doctor_id>/edit', methods=['GET', 'POST'])
@@ -175,26 +293,23 @@ def search():
 @role_required('Admin')
 def edit_doctor(doctor_id):
     doctor = Doctor.query.get_or_404(doctor_id)
-    specializations = Specialization.query.all()
+    specializations = Specialization.query.order_by(Specialization.name).all()
 
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
         specialization_id = request.form.get('specialization_id')
-
         if not name:
             flash('Doctor name is required.', 'warning')
             return redirect(url_for('admin.edit_doctor', doctor_id=doctor_id))
-
         doctor.name = name
         try:
             doctor.specialization_id = int(specialization_id) if specialization_id else None
         except ValueError:
             doctor.specialization_id = None
-
+        log_activity('doctor_updated', f'Updated doctor profile for {name}.', 'Doctor', doctor.id)
         db.session.commit()
         flash(f'Doctor {name} updated successfully.', 'success')
         return redirect(url_for('admin.admin_doctors'))
-
     return render_template('admin_edit_doctor.html', doctor=doctor, specializations=specializations)
 
 
@@ -203,7 +318,6 @@ def edit_doctor(doctor_id):
 @role_required('Admin')
 def edit_patient(patient_id):
     patient = Patient.query.get_or_404(patient_id)
-
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
         contact = request.form.get('contact', '').strip()
@@ -212,32 +326,23 @@ def edit_patient(patient_id):
         gender = request.form.get('gender')
         height = request.form.get('height')
         weight = request.form.get('weight')
-
         if not name:
             flash('Patient name is required.', 'warning')
             return redirect(url_for('admin.edit_patient', patient_id=patient_id))
-
         patient.name = name
         patient.contact = contact or None
         patient.address = address or None
-        try:
-            patient.age = int(age) if age else None
-        except ValueError:
-            patient.age = None
+        try: patient.age = int(age) if age else None
+        except ValueError: patient.age = None
         patient.gender = gender or None
-        try:
-            patient.height = float(height) if height else None
-        except ValueError:
-            patient.height = None
-        try:
-            patient.weight = float(weight) if weight else None
-        except ValueError:
-            patient.weight = None
-
+        try: patient.height = float(height) if height else None
+        except ValueError: patient.height = None
+        try: patient.weight = float(weight) if weight else None
+        except ValueError: patient.weight = None
+        log_activity('patient_updated', f'Updated patient profile for {name}.', 'Patient', patient.id)
         db.session.commit()
         flash(f'Patient {name} updated successfully.', 'success')
         return redirect(url_for('admin.admin_patients'))
-
     return render_template('admin_edit_patient.html', patient=patient)
 
 
@@ -247,6 +352,8 @@ def edit_patient(patient_id):
 def blacklist_doctor(doctor_id):
     doctor = Doctor.query.get_or_404(doctor_id)
     doctor.is_blacklisted = True
+    log_activity('doctor_blacklisted', f'Blacklisted doctor {doctor.name}.', 'Doctor', doctor.id)
+    notify_user(doctor.id, 'Account access changed', 'Your doctor account has been blacklisted by an administrator.', 'warning', '/doctor/dashboard')
     db.session.commit()
     flash(f'Doctor {doctor.name} has been blacklisted.', 'success')
     return redirect(url_for('admin.admin_doctors'))
@@ -258,6 +365,8 @@ def blacklist_doctor(doctor_id):
 def blacklist_patient(patient_id):
     patient = Patient.query.get_or_404(patient_id)
     patient.is_blacklisted = True
+    log_activity('patient_blacklisted', f'Blacklisted patient {patient.name}.', 'Patient', patient.id)
+    notify_user(patient.id, 'Account access changed', 'Your patient account has been blacklisted by an administrator.', 'warning', '/patient/dashboard')
     db.session.commit()
     flash(f'Patient {patient.name} has been blacklisted.', 'success')
     return redirect(url_for('admin.admin_patients'))
@@ -269,6 +378,8 @@ def blacklist_patient(patient_id):
 def unblacklist_doctor(doctor_id):
     doctor = Doctor.query.get_or_404(doctor_id)
     doctor.is_blacklisted = False
+    log_activity('doctor_restored', f'Restored doctor {doctor.name}.', 'Doctor', doctor.id)
+    notify_user(doctor.id, 'Account restored', 'Your doctor account has been restored by an administrator.', 'success', '/doctor/dashboard')
     db.session.commit()
     flash(f'Doctor {doctor.name} has been unblacklisted.', 'success')
     return redirect(url_for('admin.admin_doctors'))
@@ -280,6 +391,8 @@ def unblacklist_doctor(doctor_id):
 def unblacklist_patient(patient_id):
     patient = Patient.query.get_or_404(patient_id)
     patient.is_blacklisted = False
+    log_activity('patient_restored', f'Restored patient {patient.name}.', 'Patient', patient.id)
+    notify_user(patient.id, 'Account restored', 'Your patient account has been restored by an administrator.', 'success', '/patient/dashboard')
     db.session.commit()
     flash(f'Patient {patient.name} has been unblacklisted.', 'success')
     return redirect(url_for('admin.admin_patients'))

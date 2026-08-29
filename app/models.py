@@ -90,3 +90,30 @@ class DoctorAvailability(db.Model):
     updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
     
     doctor = db.relationship('Doctor', backref=db.backref('availability', lazy=True))
+
+
+class Notification(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    title = db.Column(db.String(160), nullable=False)
+    message = db.Column(db.String(500), nullable=False)
+    category = db.Column(db.String(40), default='info', nullable=False)
+    target_url = db.Column(db.String(300), nullable=True)
+    is_read = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+
+    user = db.relationship('User', backref=db.backref('notifications', lazy=True, cascade='all, delete-orphan'))
+
+
+class AuditLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True, index=True)
+    actor_username = db.Column(db.String(100), nullable=False)
+    actor_role = db.Column(db.String(50), nullable=False)
+    action = db.Column(db.String(80), nullable=False, index=True)
+    entity_type = db.Column(db.String(80), nullable=True)
+    entity_id = db.Column(db.Integer, nullable=True)
+    description = db.Column(db.String(500), nullable=False)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+
+    user = db.relationship('User', backref=db.backref('audit_logs', lazy=True))

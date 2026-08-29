@@ -1,39 +1,7 @@
-{% extends 'layout.html' %}
-
-{% block title %}Patients{% endblock %}
-{% block page_title %}Patients{% endblock %}
+{% extends 'layout.html' %}{% block title %}Patients{% endblock %}{% block page_title %}Patients{% endblock %}
 {% block content %}
-<div class="container mt-4">
-  <h2>Patients</h2>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Name</th>
-          <th>Age</th>
-          <th>Gender</th>
-          <th>Contact</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in patients %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td>{{ p.name or 'Unknown' }}</td>
-          <td>{{ p.age or '-' }}</td>
-          <td>{{ p.gender or '-' }}</td>
-          <td>{{ p.contact or '-' }}</td>
-          <td>
-            <a class="btn btn-sm btn-primary" href="{{ url_for('doctor.doctor_view_patient', patient_id=p.id) }}">View</a>
-          </td>
-        </tr>
-        {% else %}
-        <tr><td colspan="6">No patients found.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
+<div class="page-header"><div><span class="hms-kicker">Patient records</span><h2 class="page-title">Patient directory</h2><p class="page-subtitle">Quickly find a patient by name, contact, or address.</p></div></div>
+<form method="GET" class="hms-filter-panel mb-4"><div class="row g-3 align-items-end"><div class="col-md-10"><label class="form-label">Search patients</label><input class="form-control" name="q" value="{{ q }}" placeholder="Name, phone, or address..."></div><div class="col-md-2 d-grid"><button class="btn btn-primary"><i class="bi bi-search me-1"></i> Search</button></div></div></form>
+<div class="hms-results-summary"><span><strong>{{ patients|length }}</strong> patient{{ '' if patients|length == 1 else 's' }} found</span>{% if q %}<a href="{{ url_for('doctor.doctor_patients') }}">Clear search</a>{% endif %}</div>
+{% if patients %}<div class="table-responsive"><table class="table table-hover"><thead><tr><th>ID</th><th>Name</th><th>Contact</th><th>Age</th><th>Gender</th><th></th></tr></thead><tbody>{% for p in patients %}<tr><td>#{{ p.id }}</td><td><strong>{{ p.name or '—' }}</strong></td><td>{{ p.contact or '—' }}</td><td>{{ p.age if p.age is not none else '—' }}</td><td>{{ p.gender or '—' }}</td><td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('doctor.doctor_view_patient', patient_id=p.id) }}">Profile</a> <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('doctor.view_patient_history', patient_id=p.id) }}">History</a></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="hms-empty"><i class="bi bi-person-x"></i><p>No patients match this search.</p></div>{% endif %}
 {% endblock %}

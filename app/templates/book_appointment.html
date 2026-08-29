@@ -5,7 +5,7 @@
 <div class="page-header"><div><h2 class="page-title">Book an appointment</h2><p class="page-subtitle">Choose from availability published by your doctor. Occupied slots disappear automatically.</p></div></div>
 <div class="row g-4">
   <div class="col-xl-8"><div class="hms-panel"><form method="POST" action="{{ url_for('patient.book_appointment') }}" id="bookingForm">
-    <div class="mb-4"><label for="doctor_id" class="form-label">Doctor</label><select class="form-select" id="doctor_id" name="doctor_id" required><option value="">Choose a doctor...</option>{% for doctor in doctors %}<option value="{{ doctor.id }}">Dr. {{ doctor.name }}{% if doctor.specialization %} · {{ doctor.specialization.name }}{% endif %}</option>{% endfor %}</select><div class="form-text" id="doctorHelp">Only doctors with published free slots can be booked.</div></div>
+    <div class="mb-4"><label for="doctor_id" class="form-label">Doctor</label><select class="form-select" id="doctor_id" name="doctor_id" required><option value="">Choose a doctor...</option>{% for doctor in doctors %}<option value="{{ doctor.id }}" {% if selected_doctor_id == doctor.id %}selected{% endif %}>Dr. {{ doctor.name }}{% if doctor.specialization %} · {{ doctor.specialization.name }}{% endif %}</option>{% endfor %}</select><div class="form-text" id="doctorHelp">Only doctors with published free slots can be booked.</div></div>
     <div class="row g-3 mb-4"><div class="col-md-6"><label for="date" class="form-label">Available date</label><select class="form-select" id="date" name="date" required disabled><option value="">Select doctor first</option></select></div><div class="col-md-6"><label for="time" class="form-label">Available time</label><select class="form-select" id="time" name="time" required disabled><option value="">Select date first</option></select></div></div>
     <div class="mb-4"><label for="reason" class="form-label">Reason for visit</label><textarea class="form-control" id="reason" name="reason" rows="4" required placeholder="Briefly describe your symptoms or reason for consultation..."></textarea></div>
     <div class="d-flex gap-2 flex-wrap"><button type="submit" class="btn btn-primary"><i class="bi bi-calendar2-check me-1"></i>Request appointment</button><a href="{{ url_for('patient.patient_dashboard') }}" class="btn btn-outline-primary">Back</a></div>
@@ -27,19 +27,21 @@ const prettyTime = value => {
   return d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
 };
 function resetSelect(select, text) { select.innerHTML = `<option value="">${text}</option>`; select.disabled = true; }
-doctorSelect.addEventListener('change', () => {
+function populateDates() {
   resetSelect(dateSelect, 'Choose a date'); resetSelect(timeSelect, 'Select date first');
   const dates = slotMap[doctorSelect.value] || {};
   const keys = Object.keys(dates).sort();
   if (!keys.length) { doctorHelp.textContent = 'No free slots published for this doctor in the next 14 days.'; return; }
   doctorHelp.textContent = `${keys.reduce((n,k)=>n+dates[k].length,0)} free slots available across ${keys.length} day(s).`;
   keys.forEach(key => { const option = new Option(prettyDate(key), key); dateSelect.add(option); }); dateSelect.disabled = false;
-});
+}
+doctorSelect.addEventListener('change', populateDates);
 dateSelect.addEventListener('change', () => {
   resetSelect(timeSelect, 'Choose a time');
   const slots = (slotMap[doctorSelect.value] || {})[dateSelect.value] || [];
   slots.forEach(slot => timeSelect.add(new Option(prettyTime(slot), slot)));
   timeSelect.disabled = slots.length === 0;
 });
+if (doctorSelect.value) populateDates();
 </script>
 {% endblock %}

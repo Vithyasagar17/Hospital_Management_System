@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timedelta
 from app import create_app, db
-from app.models import User, Specialization, Doctor, Patient, DoctorAvailability, Appointment, Prescription, PrescriptionItem
+from app.models import User, Specialization, Doctor, Patient, DoctorAvailability, Appointment, Prescription, PrescriptionItem, Notification, AuditLog
 
 app = create_app()
 
@@ -10,9 +10,9 @@ with app.app_context():
 
     db_path = os.path.join(app.instance_path, 'hms.db')
 
-    if os.path.exists(db_path):
-        os.remove(db_path)
-
+    # Explicit reset command: rebuild the schema cleanly without unlinking an
+    # SQLite file while SQLAlchemy may still hold an open connection.
+    db.drop_all()
     db.create_all()
 
     from sqlalchemy import text
@@ -166,6 +166,24 @@ with app.app_context():
             medicine='Paracetamol', dosage='500 mg', frequency='1 tablet every 8 hours if fever',
             duration='3 days', quantity=9, instructions='Take after food; do not exceed advised dose.'
         ))
+        db.session.commit()
+
+    # Phase 3 demo activity: notifications and auditable actions are visible immediately.
+    admin_user = User.query.filter_by(username='admin').first()
+    if admin_user and sample_doctor_user and sample_patient_user:
+        if not AuditLog.query.first():
+            db.session.add_all([
+                AuditLog(user_id=admin_user.id, actor_username='admin', actor_role='Admin', action='demo_database_created', entity_type='System', description='Initialized the Medora HMS demo database.'),
+                AuditLog(user_id=sample_doctor_user.id, actor_username='dr_sample', actor_role='Doctor', action='prescription_created', entity_type='Prescription', entity_id=rx.id if 'rx' in locals() else None, description='Created a structured prescription for the sample completed consultation.'),
+                AuditLog(user_id=sample_patient_user.id, actor_username='patient_sample', actor_role='Patient', action='appointment_completed', entity_type='Appointment', entity_id=visit.id if 'visit' in locals() else None, description='Completed sample consultation available in medical history.'),
+            ])
+        if not Notification.query.first():
+            db.session.add_all([
+                Notification(user_id=sample_patient_user.id, title='Prescription available', message='Your sample consultation has a digital prescription ready to review.', category='success', target_url=f'/patient/prescription/{rx.id}' if 'rx' in locals() else '/patient/medical-history', is_read=False),
+                Notification(user_id=sample_patient_user.id, title='Welcome to Medora HMS', message='Use the notification center to track appointment and prescription updates.', category='info', target_url='/patient/dashboard', is_read=True),
+                Notification(user_id=sample_doctor_user.id, title='Phase 3 workspace ready', message='Appointment changes and patient cancellations will now appear here.', category='info', target_url='/doctor/dashboard', is_read=False),
+                Notification(user_id=admin_user.id, title='Audit trail enabled', message='Administrative and clinical actions are now recorded in the system audit log.', category='success', target_url='/admin/audit-logs', is_read=False),
+            ])
         db.session.commit()
 
     print("Database created successfully!")

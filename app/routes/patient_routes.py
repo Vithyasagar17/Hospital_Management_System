@@ -3,6 +3,8 @@ from flask_login import login_required, current_user
 from app.routes.auth_decorator import role_required
 from app.models import Patient, Doctor, Appointment, Specialization, DoctorAvailability, Prescription
 from app import db
+from sqlalchemy import or_
+from app.activity import log_activity, notify_user
 from datetime import datetime, timedelta
 from app.scheduling import available_slots_for_doctor, is_valid_booking_slot
 
@@ -75,6 +77,7 @@ def patient_profile():
         except ValueError:
             patient.weight = None
 
+        log_activity('patient_profile_updated', f'Updated patient profile for {patient.name}.', 'Patient', patient.id)
         db.session.commit()
         return redirect(url_for('patient.patient_dashboard'))
 
@@ -142,6 +145,11 @@ def book_appointment():
                 status='Pending'
             )
             db.session.add(appointment)
+            db.session.flush()
+            patient_name = patient.name if patient and patient.name else current_user.username
+            doctor_name = doctor.name if doctor and doctor.name else 'Doctor'
+            log_activity('appointment_booked', f'Booked appointment #{appointment.id} with Dr. {doctor_name}.', 'Appointment', appointment.id)
+            notify_user(doctor_id, 'New appointment request', f'{patient_name} requested {date.strftime("%d %b %Y at %I:%M %p")}.', 'info', f'/doctor/appointment/{appointment.id}')
             db.session.commit()
             flash('Appointment request sent to the doctor.', 'success')
             return redirect(url_for('patient.view_appointments'))
@@ -153,10 +161,11 @@ def book_appointment():
     slot_map = {}
     for doctor in doctors:
         slot_map[str(doctor.id)] = available_slots_for_doctor(doctor.id, days=15)
+    selected_doctor_id = request.args.get('doctor_id', type=int)
 
     return render_template(
         'book_appointment.html', doctors=doctors, patient=patient,
-        now=datetime.now(), slot_map=slot_map
+        now=datetime.now(), slot_map=slot_map, selected_doctor_id=selected_doctor_id
     )
 
 @patient_bp.route('/appointments')
@@ -164,11 +173,23 @@ def book_appointment():
 @role_required('Patient')
 def view_appointments():
     status = request.args.get('status', 'all')
-    query = Appointment.query.filter_by(patient_id=current_user.id)
+    q = request.args.get('q', '').strip()
+    date_from_raw = request.args.get('date_from', '')
+    date_to_raw = request.args.get('date_to', '')
+    query = Appointment.query.join(Doctor, Appointment.doctor_id == Doctor.id).filter(Appointment.patient_id == current_user.id)
     if status in {'Pending', 'Confirmed', 'Completed', 'Cancelled'}:
-        query = query.filter_by(status=status)
+        query = query.filter(Appointment.status == status)
+    if q:
+        query = query.filter(or_(Doctor.name.ilike(f'%{q}%'), Appointment.reason.ilike(f'%{q}%')))
+    try:
+        if date_from_raw:
+            query = query.filter(Appointment.date >= datetime.strptime(date_from_raw, '%Y-%m-%d'))
+        if date_to_raw:
+            query = query.filter(Appointment.date < datetime.strptime(date_to_raw, '%Y-%m-%d') + timedelta(days=1))
+    except ValueError:
+        flash('One of the date filters was invalid and has been ignored.', 'warning')
     appointments = query.order_by(Appointment.date.desc()).all()
-    return render_template('view_appointments.html', appointments=appointments, status=status, now=datetime.now())
+    return render_template('view_appointments.html', appointments=appointments, status=status, now=datetime.now(), q=q, date_from=date_from_raw, date_to=date_to_raw)
 
 
 @patient_bp.route('/appointment/<int:appointment_id>')
@@ -199,26 +220,39 @@ def prescription_detail(prescription_id):
 @login_required
 @role_required('Patient')
 def search_doctors():
-    query = request.args.get('q', '').strip()
-    search_type = request.args.get('type', 'all')
+    q = request.args.get('q', '').strip()
+    specialization_id = request.args.get('specialization_id', type=int)
+    available_on_raw = request.args.get('available_on', '').strip()
 
-    results = {'doctors': [], 'specializations': []}
+    query = Doctor.query.filter(Doctor.is_blacklisted.is_(False))
+    if q:
+        query = query.filter(or_(Doctor.name.ilike(f'%{q}%'), Doctor.specialization.has(Specialization.name.ilike(f'%{q}%'))))
+    if specialization_id:
+        query = query.filter(Doctor.specialization_id == specialization_id)
 
-    if query:
-        if search_type in ['all', 'doctor']:
-            # Search by doctor name
-            results['doctors'] = Doctor.query.filter(
-                Doctor.name.ilike(f'%{query}%'),
-                Doctor.is_blacklisted == False
-            ).all()
+    doctors = query.order_by(Doctor.name).all()
+    available_slots = {}
+    available_on = None
+    if available_on_raw:
+        try:
+            available_on = datetime.strptime(available_on_raw, '%Y-%m-%d').date()
+        except ValueError:
+            flash('Invalid availability date.', 'warning')
 
-        if search_type in ['all', 'specialization']:
-            # Search by specialization
-            results['specializations'] = Specialization.query.filter(
-                Specialization.name.ilike(f'%{query}%')
-            ).all()
+    if available_on:
+        filtered = []
+        for doctor in doctors:
+            slot_map = available_slots_for_doctor(doctor.id, days=15)
+            day_slots = slot_map.get(available_on.isoformat(), [])
+            if day_slots:
+                filtered.append(doctor)
+                available_slots[str(doctor.id)] = day_slots
+        doctors = filtered
 
-    return render_template('patient_search_doctors.html', results=results, query=query, search_type=search_type)
+    specializations = Specialization.query.order_by(Specialization.name).all()
+    return render_template('patient_search_doctors.html', doctors=doctors, query=q,
+                           specialization_id=specialization_id, specializations=specializations,
+                           available_on=available_on_raw, available_slots=available_slots)
 
 
 @patient_bp.route('/doctor/<int:doctor_id>/profile')
@@ -251,6 +285,9 @@ def cancel_appointment(appointment_id):
 
     appointment.status = 'Cancelled'
     appointment.updated_at = datetime.utcnow()
+    patient_name = appointment.patient.name if appointment.patient and appointment.patient.name else current_user.username
+    log_activity('appointment_cancelled', f'Cancelled appointment #{appointment.id}.', 'Appointment', appointment.id)
+    notify_user(appointment.doctor_id, 'Appointment cancelled', f'{patient_name} cancelled the appointment on {appointment.date.strftime("%d %b %Y at %I:%M %p")}.', 'warning', f'/doctor/appointment/{appointment.id}')
     db.session.commit()
 
     flash('Appointment cancelled successfully.', 'success')

@@ -60,3 +60,17 @@ This deletes/recreates `instance/hms.db`, seeds the accounts below, and publishe
 - Chronological medical timeline with status, notes, diagnosis and prescription links
 - Doctor-facing patient clinical timeline
 - Existing SQLite databases are upgraded automatically with additive nullable columns; no reset is required
+
+## Phase 3 operations layer added
+
+- Notification bell and full notification center for every authenticated role
+- Real workflow notifications for booking, status changes, cancellations, prescriptions and account actions
+- Read/unread notification states with mark-all-read
+- Admin universal search across doctors, patients and appointments
+- Advanced filters for doctor/patient directories, appointments and prescriptions
+- Patient doctor discovery can filter by specialization and a date with real free slots
+- Admin-only audit log with actor, role, action, entity, timestamp and description
+- Audit entries for login/logout, registration, admin account controls, appointment workflow, notes, prescriptions, medicines and availability
+- Existing Phase 2 databases are upgraded automatically with additive `notification` and `audit_log` tables
+
+See `PHASE3_UPGRADE_NOTES.md` for the recommended Phase 3 demo flow.

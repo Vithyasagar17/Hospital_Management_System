@@ -76,6 +76,9 @@
           <a class="hms-nav-link {% if request.endpoint == 'admin.search' %}active{% endif %}" href="{{ url_for('admin.search') }}"><i class="bi bi-search"></i><span>Search records</span></a>
           <a class="hms-nav-link {% if request.endpoint == 'admin.admin_overview' %}active{% endif %}" href="{{ url_for('admin.admin_overview') }}"><i class="bi bi-bar-chart-line"></i><span>Overview</span></a>
         {% endif %}
+        <div class="hms-nav-label mt-2">Activity</div>
+        <a class="hms-nav-link {% if request.endpoint in ['auth.notifications','auth.open_notification'] %}active{% endif %}" href="{{ url_for('auth.notifications') }}"><i class="bi bi-bell"></i><span>Notifications</span>{% if unread_notification_count %}<span class="hms-nav-badge">{{ unread_notification_count if unread_notification_count < 100 else '99+' }}</span>{% endif %}</a>
+        {% if role == 'Admin' %}<a class="hms-nav-link {% if request.endpoint == 'admin.audit_logs' %}active{% endif %}" href="{{ url_for('admin.audit_logs') }}"><i class="bi bi-shield-check"></i><span>Audit logs</span></a>{% endif %}
       </nav>
 
       <div class="hms-sidebar-footer">
@@ -94,7 +97,14 @@
           </div>
         </div>
         <div class="hms-topbar-actions">
-          <div class="hms-status"><span></span> System online</div>
+          <div class="hms-status d-none d-md-flex"><span></span> System online</div>
+          <div class="dropdown">
+            <button class="hms-notification-button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Notifications"><i class="bi bi-bell"></i>{% if unread_notification_count %}<span class="hms-notification-count">{{ unread_notification_count if unread_notification_count < 10 else '9+' }}</span>{% endif %}</button>
+            <div class="dropdown-menu dropdown-menu-end hms-notification-menu">
+              <div class="hms-notification-menu-head"><strong>Notifications</strong><a href="{{ url_for('auth.notifications') }}">View all</a></div>
+              {% if nav_notifications %}{% for n in nav_notifications %}<a class="hms-notification-menu-item {% if not n.is_read %}unread{% endif %}" href="{{ url_for('auth.open_notification', notification_id=n.id) }}"><span class="hms-mini-icon {{ n.category }}"><i class="bi bi-bell"></i></span><span><strong>{{ n.title }}</strong><small>{{ n.message|truncate(62) }}</small></span></a>{% endfor %}{% else %}<div class="hms-notification-menu-empty">No notifications yet.</div>{% endif %}
+            </div>
+          </div>
           <div class="hms-avatar hms-avatar-sm">{{ current_user.username[:2]|upper }}</div>
         </div>
       </header>
