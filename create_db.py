@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timedelta
 from app import create_app, db
-from app.models import User, Specialization, Doctor, Patient, DoctorAvailability
+from app.models import User, Specialization, Doctor, Patient, DoctorAvailability, Appointment, Prescription, PrescriptionItem
 
 app = create_app()
 
@@ -134,6 +134,38 @@ with app.app_context():
 
         patient = Patient(id=patient_user.id, name='Kumar', age=35, height=175, weight=75, contact='9876543210', address='123 Main St')
         db.session.add(patient)
+        db.session.commit()
+
+    # Phase 2 demo record: a completed visit with a structured prescription.
+    sample_doctor_user = User.query.filter_by(username='dr_sample').first()
+    sample_patient_user = User.query.filter_by(username='patient_sample').first()
+    if sample_doctor_user and sample_patient_user and not Appointment.query.first():
+        visit_time = datetime.now().replace(hour=10, minute=0, second=0, microsecond=0) - timedelta(days=7)
+        visit = Appointment(
+            patient_id=sample_patient_user.id,
+            doctor_id=sample_doctor_user.id,
+            date=visit_time,
+            time='10:00',
+            reason='Fever, fatigue and mild body ache for two days',
+            status='Completed',
+            notes='Vitals stable. Hydration advised; return if fever persists beyond 3 days.'
+        )
+        db.session.add(visit)
+        db.session.commit()
+
+        rx = Prescription(
+            appointment_id=visit.id,
+            diagnosis='Acute viral fever',
+            advice='Rest, maintain oral fluids, light diet, and monitor temperature twice daily.',
+            follow_up_date=(visit_time + timedelta(days=5)).date()
+        )
+        db.session.add(rx)
+        db.session.commit()
+        db.session.add(PrescriptionItem(
+            prescription_id=rx.id,
+            medicine='Paracetamol', dosage='500 mg', frequency='1 tablet every 8 hours if fever',
+            duration='3 days', quantity=9, instructions='Take after food; do not exceed advised dose.'
+        ))
         db.session.commit()
 
     print("Database created successfully!")

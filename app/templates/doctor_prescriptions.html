@@ -1,58 +1,7 @@
 {% extends 'layout.html' %}
-
 {% block title %}Prescriptions{% endblock %}
 {% block page_title %}Prescriptions{% endblock %}
 {% block content %}
-<div class="container mt-4">
-  <h2>Prescriptions</h2>
-
-  <div class="mb-3">
-    <a href="{{ url_for('doctor.new_prescription') }}" class="btn btn-primary">New Prescription</a>
-  </div>
-
-  <div class="table-responsive">
-    <table class="table table-striped table-bordered">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Patient</th>
-          <th>Doctor</th>
-          <th>Date</th>
-          <th>Diagnosis</th>
-          <th>Medicines</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in prescriptions %}
-        <tr>
-          <td>{{ p.id }}</td>
-          <td>{{ p.appointment.patient.name if p.appointment and p.appointment.patient else '—' }}</td>
-          <td>{{ p.appointment.doctor.name if p.appointment and p.appointment.doctor else '—' }}</td>
-          <td>{{ p.created_at.strftime('%Y-%m-%d') if p.created_at else '—' }}</td>
-          <td>{{ p.diagnosis }}</td>
-          <td>
-            {% if p.items %}
-              <ul class="mb-0">
-                {% for i in p.items %}
-                <li>{{ i.medicine }} {% if i.dosage %} — {{ i.dosage }}{% endif %} {% if i.quantity %} (qty: {{ i.quantity }}){% endif %}</li>
-                {% endfor %}
-              </ul>
-            {% else %}
-              <em>No medicines</em>
-            {% endif %}
-          </td>
-          <td>
-            <a href="{{ url_for('doctor.prescription_detail', prescription_id=p.id) }}" class="btn btn-sm btn-outline-primary">Open</a>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  {% if not prescriptions %}
-  <div class="alert alert-info">No prescriptions yet.</div>
-  {% endif %}
-</div>
+<div class="page-header"><div><h2 class="page-title">Prescriptions</h2><p class="page-subtitle">Structured clinical plans linked directly to patient consultations.</p></div><a href="{{ url_for('doctor.new_prescription') }}" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>New prescription</a></div>
+{% if prescriptions %}<div class="hms-rx-list">{% for p in prescriptions %}<article class="hms-rx-list-card"><div class="hms-rx-list-icon"><i class="bi bi-file-earmark-medical"></i></div><div class="flex-grow-1"><div class="d-flex align-items-center gap-2 flex-wrap"><h3>{{ p.appointment.patient.name if p.appointment.patient else 'Patient' }}</h3><span class="hms-rx-id">#{{ p.id }}</span></div><p>{{ p.diagnosis }}</p><div class="hms-rx-meta"><span><i class="bi bi-calendar3"></i>{{ p.created_at.strftime('%d %b %Y') if p.created_at else '—' }}</span><span><i class="bi bi-capsule"></i>{{ p.items|length }} medicines</span>{% if p.follow_up_date %}<span><i class="bi bi-calendar-check"></i>Follow-up {{ p.follow_up_date.strftime('%d %b') }}</span>{% endif %}</div></div><a href="{{ url_for('doctor.prescription_detail', prescription_id=p.id) }}" class="btn btn-outline-primary btn-sm">Open</a></article>{% endfor %}</div>{% else %}<div class="hms-empty"><i class="bi bi-prescription2"></i><p>No prescriptions yet.</p><a href="{{ url_for('doctor.new_prescription') }}" class="btn btn-primary btn-sm">Create prescription</a></div>{% endif %}
 {% endblock %}

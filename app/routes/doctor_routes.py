@@ -106,6 +106,20 @@ def view_appointments():
     return render_template('doctor_appointments.html', appointments=appointments, status=status)
 
 
+@doctor_bp.route('/appointment/<int:appointment_id>')
+@login_required
+@role_required('Doctor')
+def appointment_detail(appointment_id):
+    appointment = Appointment.query.get_or_404(appointment_id)
+    if appointment.doctor_id != current_user.id:
+        abort(403)
+    prescription = appointment.prescriptions[0] if appointment.prescriptions else None
+    return render_template(
+        'appointment_detail.html', appointment=appointment, prescription=prescription,
+        viewer_role='Doctor', now=datetime.now()
+    )
+
+
 @doctor_bp.route('/prescriptions')
 @login_required
 @role_required('Doctor')
@@ -118,9 +132,14 @@ def prescriptions():
 @login_required
 @role_required('Doctor')
 def new_prescription():
-    appointments = Appointment.query.filter_by(doctor_id=current_user.id, status='Confirmed').order_by(Appointment.date.desc()).all()
+    appointments = Appointment.query.filter(
+        Appointment.doctor_id == current_user.id,
+        Appointment.status.in_(['Confirmed', 'Completed'])
+    ).order_by(Appointment.date.desc()).all()
+    appointment_id = request.args.get('appointment_id', type=int)
+
     if request.method == 'POST':
-        appointment_id = request.form.get('appointment_id')
+        appointment_id = request.form.get('appointment_id', type=int)
         if not appointment_id:
             flash('Please select an appointment to create a prescription for.', 'warning')
             return redirect(url_for('doctor.new_prescription'))
@@ -128,13 +147,43 @@ def new_prescription():
         appt = Appointment.query.get_or_404(appointment_id)
         if appt.doctor_id != current_user.id:
             abort(403)
+        if appt.status not in ['Confirmed', 'Completed']:
+            flash('A prescription can only be created for a confirmed or completed consultation.', 'warning')
+            return redirect(url_for('doctor.appointment_detail', appointment_id=appt.id))
+        if appt.prescriptions:
+            flash('This appointment already has a prescription.', 'info')
+            return redirect(url_for('doctor.prescription_detail', prescription_id=appt.prescriptions[0].id))
 
-        prescription = Prescription(appointment_id=appt.id, diagnosis='')
+        diagnosis = request.form.get('diagnosis', '').strip()
+        advice = request.form.get('advice', '').strip()
+        follow_up_raw = request.form.get('follow_up_date', '').strip()
+        if not diagnosis:
+            flash('Diagnosis is required to create the prescription.', 'warning')
+            return redirect(url_for('doctor.new_prescription', appointment_id=appt.id))
+
+        follow_up_date = None
+        if follow_up_raw:
+            try:
+                follow_up_date = datetime.strptime(follow_up_raw, '%Y-%m-%d').date()
+            except ValueError:
+                flash('Invalid follow-up date.', 'warning')
+                return redirect(url_for('doctor.new_prescription', appointment_id=appt.id))
+
+        prescription = Prescription(
+            appointment_id=appt.id,
+            diagnosis=diagnosis,
+            advice=advice or None,
+            follow_up_date=follow_up_date
+        )
         db.session.add(prescription)
         db.session.commit()
+        flash('Prescription created. Add medicines below.', 'success')
         return redirect(url_for('doctor.prescription_detail', prescription_id=prescription.id))
 
-    return render_template('new_prescription.html', appointments=appointments)
+    selected_appointment = None
+    if appointment_id:
+        selected_appointment = Appointment.query.filter_by(id=appointment_id, doctor_id=current_user.id).first()
+    return render_template('new_prescription.html', appointments=appointments, selected_appointment=selected_appointment)
 
 
 @doctor_bp.route('/prescription/<int:prescription_id>', methods=['GET', 'POST'])
@@ -148,8 +197,10 @@ def prescription_detail(prescription_id):
     if request.method == 'POST':
         medicine = request.form.get('medicine')
         dosage = request.form.get('dosage')
-        duration = request.form.get('duration')
+        frequency = request.form.get('frequency', '').strip()
+        duration = request.form.get('duration', '').strip()
         quantity = request.form.get('quantity')
+        instructions = request.form.get('instructions', '').strip()
         if not medicine:
             flash('Medicine name is required.', 'warning')
             return redirect(url_for('doctor.prescription_detail', prescription_id=prescription.id))
@@ -158,7 +209,10 @@ def prescription_detail(prescription_id):
         except ValueError:
             qty = None
 
-        item = PrescriptionItem(prescription_id=prescription.id, medicine=medicine, dosage=dosage, duration=duration, quantity=qty)
+        item = PrescriptionItem(
+            prescription_id=prescription.id, medicine=medicine.strip(), dosage=(dosage or '').strip() or None,
+            frequency=frequency or None, duration=duration or None, quantity=qty, instructions=instructions or None
+        )
         db.session.add(item)
         db.session.commit()
         return redirect(url_for('doctor.prescription_detail', prescription_id=prescription.id))
@@ -174,13 +228,27 @@ def edit_prescription(prescription_id):
     if prescription.appointment.doctor_id != current_user.id:
         abort(403)
 
-    diagnosis = request.form.get('diagnosis')
-    if diagnosis:
-        prescription.diagnosis = diagnosis
-        db.session.commit()
-    else:
+    diagnosis = request.form.get('diagnosis', '').strip()
+    advice = request.form.get('advice', '').strip()
+    follow_up_raw = request.form.get('follow_up_date', '').strip()
+    if not diagnosis:
         flash('Diagnosis cannot be empty.', 'error')
+        return redirect(url_for('doctor.prescription_detail', prescription_id=prescription.id))
 
+    follow_up_date = None
+    if follow_up_raw:
+        try:
+            follow_up_date = datetime.strptime(follow_up_raw, '%Y-%m-%d').date()
+        except ValueError:
+            flash('Invalid follow-up date.', 'warning')
+            return redirect(url_for('doctor.prescription_detail', prescription_id=prescription.id))
+
+    prescription.diagnosis = diagnosis
+    prescription.advice = advice or None
+    prescription.follow_up_date = follow_up_date
+    prescription.updated_at = datetime.utcnow()
+    db.session.commit()
+    flash('Prescription summary updated.', 'success')
     return redirect(url_for('doctor.prescription_detail', prescription_id=prescription.id))
 
 
@@ -241,7 +309,22 @@ def update_appointment_status(appointment_id):
     appointment.updated_at = datetime.utcnow()
     db.session.commit()
 
-    return redirect(url_for('doctor.view_appointments'))
+    flash(f'Appointment marked as {status.lower()}.', 'success')
+    return redirect(request.referrer or url_for('doctor.view_appointments'))
+
+
+@doctor_bp.route('/appointment/<int:appointment_id>/notes', methods=['POST'])
+@login_required
+@role_required('Doctor')
+def update_appointment_notes(appointment_id):
+    appointment = Appointment.query.get_or_404(appointment_id)
+    if appointment.doctor_id != current_user.id:
+        abort(403)
+    appointment.notes = request.form.get('notes', '').strip() or None
+    appointment.updated_at = datetime.utcnow()
+    db.session.commit()
+    flash('Consultation notes saved.', 'success')
+    return redirect(url_for('doctor.appointment_detail', appointment_id=appointment.id))
 
 
 @doctor_bp.route('/availability', methods=['GET', 'POST'])

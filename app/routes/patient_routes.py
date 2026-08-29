@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import login_required, current_user
 from app.routes.auth_decorator import role_required
-from app.models import Patient, Doctor, Appointment, Specialization, DoctorAvailability
+from app.models import Patient, Doctor, Appointment, Specialization, DoctorAvailability, Prescription
 from app import db
 from datetime import datetime, timedelta
 from app.scheduling import available_slots_for_doctor, is_valid_booking_slot
@@ -169,6 +169,30 @@ def view_appointments():
         query = query.filter_by(status=status)
     appointments = query.order_by(Appointment.date.desc()).all()
     return render_template('view_appointments.html', appointments=appointments, status=status, now=datetime.now())
+
+
+@patient_bp.route('/appointment/<int:appointment_id>')
+@login_required
+@role_required('Patient')
+def appointment_detail(appointment_id):
+    appointment = Appointment.query.get_or_404(appointment_id)
+    if appointment.patient_id != current_user.id:
+        abort(403)
+    prescription = appointment.prescriptions[0] if appointment.prescriptions else None
+    return render_template(
+        'appointment_detail.html', appointment=appointment, prescription=prescription,
+        viewer_role='Patient', now=datetime.now()
+    )
+
+
+@patient_bp.route('/prescription/<int:prescription_id>')
+@login_required
+@role_required('Patient')
+def prescription_detail(prescription_id):
+    prescription = Prescription.query.get_or_404(prescription_id)
+    if prescription.appointment.patient_id != current_user.id:
+        abort(403)
+    return render_template('patient_prescription_detail.html', prescription=prescription)
 
 
 @patient_bp.route('/search-doctors')

@@ -35,6 +35,11 @@ def create_app():
     app.register_blueprint(doctor_bp)
     app.register_blueprint(patient_bp)
 
+    # Keep older bundled SQLite databases compatible with additive Phase 2 fields.
+    with app.app_context():
+        from app.schema_upgrade import ensure_phase2_schema
+        ensure_phase2_schema()
+
     return app
 
 @login_manager.user_loader

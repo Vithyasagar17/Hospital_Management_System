@@ -15,13 +15,13 @@
   {% if a.status in ['Pending','Confirmed'] %}
   <form action="{{ url_for('doctor.update_appointment_status', appointment_id=a.id) }}" method="POST" class="hms-appointment-actions">
     <input type="text" name="notes" class="form-control form-control-sm" placeholder="Optional clinical/admin note" value="{{ a.notes or '' }}">
-    <div class="d-flex gap-2 flex-wrap">
+    <div class="d-flex gap-2 flex-wrap"><a href="{{ url_for('doctor.appointment_detail', appointment_id=a.id) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-eye me-1"></i>Details</a>
       {% if a.status == 'Pending' %}<button name="status" value="Confirmed" class="btn btn-success btn-sm"><i class="bi bi-check2 me-1"></i>Confirm</button>{% endif %}
       {% if a.status == 'Confirmed' %}<button name="status" value="Completed" class="btn btn-primary btn-sm"><i class="bi bi-check2-circle me-1"></i>Complete</button>{% endif %}
       <button name="status" value="Cancelled" class="btn btn-outline-danger btn-sm" onclick="return confirm('Cancel this appointment?')"><i class="bi bi-x-circle me-1"></i>Cancel</button>
     </div>
   </form>
-  {% endif %}
+  {% else %}<div><a href="{{ url_for('doctor.appointment_detail', appointment_id=a.id) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-eye me-1"></i>Details</a></div>{% endif %}
 </article>
 {% endfor %}
 </div>

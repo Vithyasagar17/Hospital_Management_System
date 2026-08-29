@@ -1,86 +1,29 @@
 {% extends 'layout.html' %}
-
-{% block title %}Prescription details{% endblock %}
+{% block title %}Prescription #{{ prescription.id }}{% endblock %}
 {% block page_title %}Prescription details{% endblock %}
 {% block content %}
-<div class="container mt-4">
-  <h2>Prescription #{{ prescription.id }}</h2>
+<div class="page-header no-print"><div><div class="hms-kicker">Prescription #{{ prescription.id }}</div><h2 class="page-title">{{ prescription.appointment.patient.name if prescription.appointment.patient else 'Patient' }}</h2><p class="page-subtitle">Structured medication plan linked to appointment #{{ prescription.appointment.id }}.</p></div><div class="d-flex gap-2"><button onclick="window.print()" class="btn btn-outline-primary"><i class="bi bi-printer me-1"></i>Print</button><a href="{{ url_for('doctor.appointment_detail', appointment_id=prescription.appointment.id) }}" class="btn btn-primary">Visit details</a></div></div>
 
-  <div class="card mb-3">
-    <div class="card-body">
-      <p><strong>Patient:</strong> {{ prescription.appointment.patient.name if prescription.appointment and prescription.appointment.patient else '—' }}</p>
-      <p><strong>Doctor:</strong> {{ prescription.appointment.doctor.name if prescription.appointment and prescription.appointment.doctor else '—' }}</p>
-  <p><strong>Date:</strong> {{ prescription.created_at.strftime('%Y-%m-%d %H:%M') if prescription.created_at else '—' }}</p>
-  <p><strong>Reason for Visit:</strong> {{ prescription.appointment.reason if prescription.appointment and prescription.appointment.reason else '—' }}</p>
-  <form method="POST" action="{{ url_for('doctor.edit_prescription', prescription_id=prescription.id) }}" class="mb-3">
-        <div class="form-group">
-          <label><strong>Diagnosis:</strong></label>
-          <textarea name="diagnosis" class="form-control" rows="3" required>{{ prescription.diagnosis }}</textarea>
-        </div>
-        <button type="submit" class="btn btn-sm btn-primary mt-2">Update Diagnosis</button>
-      </form>
-    </div>
+<section class="hms-prescription-sheet">
+  <div class="hms-rx-letterhead"><div><div class="hms-rx-mark"><i class="bi bi-heart-pulse-fill"></i></div><div><strong>Medora HMS</strong><span>Digital Prescription</span></div></div><div class="text-end"><small>Prescription</small><strong>#{{ prescription.id }}</strong></div></div>
+  <div class="hms-rx-patient-grid"><div><span>Patient</span><strong>{{ prescription.appointment.patient.name if prescription.appointment.patient else '—' }}</strong></div><div><span>Doctor</span><strong>Dr. {{ prescription.appointment.doctor.name if prescription.appointment.doctor else '—' }}</strong></div><div><span>Visit</span><strong>{{ prescription.appointment.date.strftime('%d %b %Y · %I:%M %p') }}</strong></div><div><span>Issued</span><strong>{{ prescription.created_at.strftime('%d %b %Y') if prescription.created_at else '—' }}</strong></div></div>
+
+  <form method="POST" action="{{ url_for('doctor.edit_prescription', prescription_id=prescription.id) }}" class="hms-rx-editor no-print">
+    <div class="row g-3"><div class="col-md-7"><label class="form-label">Diagnosis</label><textarea name="diagnosis" class="form-control" rows="3" required>{{ prescription.diagnosis }}</textarea></div><div class="col-md-5"><label class="form-label">Follow-up date</label><input type="date" name="follow_up_date" class="form-control" value="{{ prescription.follow_up_date.isoformat() if prescription.follow_up_date else '' }}"><label class="form-label mt-3">Advice</label><textarea name="advice" class="form-control" rows="2">{{ prescription.advice or '' }}</textarea></div></div>
+    <button type="submit" class="btn btn-outline-primary btn-sm mt-3">Save clinical summary</button>
+  </form>
+  <div class="print-only hms-rx-summary-print"><div><span>Diagnosis</span><p>{{ prescription.diagnosis }}</p></div>{% if prescription.advice %}<div><span>Advice</span><p>{{ prescription.advice }}</p></div>{% endif %}</div>
+
+  <div class="hms-rx-table-wrap mt-4">
+    <div class="hms-rx-section-title"><span>Rx</span><strong>Medicines</strong></div>
+    {% if prescription.items %}<div class="table-responsive"><table class="table"><thead><tr><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Instructions</th><th class="no-print">Action</th></tr></thead><tbody>{% for item in prescription.items %}<tr><td><strong>{{ item.medicine }}</strong>{% if item.quantity %}<small class="d-block text-muted">Qty {{ item.quantity }}</small>{% endif %}</td><td>{{ item.dosage or '—' }}</td><td>{{ item.frequency or '—' }}</td><td>{{ item.duration or '—' }}</td><td>{{ item.instructions or '—' }}</td><td class="no-print"><form method="POST" action="{{ url_for('doctor.delete_medicine', item_id=item.id) }}" class="d-inline"><button class="btn btn-sm btn-outline-danger" onclick="return confirm('Remove this medicine?')">Remove</button></form></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="hms-empty"><i class="bi bi-capsule"></i><p>No medicines added yet.</p></div>{% endif %}
   </div>
 
-  <h4>Medicines</h4>
-  <div class="table-responsive mb-3">
-    <table class="table table-bordered">
-      <thead>
-        <tr>
-          <th>Medicine</th>
-          <th>Dosage</th>
-          <th>Duration</th>
-          <th>Quantity</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in prescription.items %}
-        <tr>
-          <td>{{ item.medicine }}</td>
-          <td>{{ item.dosage or '—' }}</td>
-          <td>{{ item.duration or '—' }}</td>
-          <td>{{ item.quantity or '—' }}</td>
-          <td>
-            <form method="POST" action="{{ url_for('doctor.delete_medicine', item_id=item.id) }}" class="d-inline">
-              <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Remove this medicine?')">Remove</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% if not prescription.items %}
-    <div class="alert alert-info">No medicines added yet.</div>
-    {% endif %}
-  </div>
-
-  <h5>Add Medicine</h5>
-  <form method="POST" action="{{ url_for('doctor.prescription_detail', prescription_id=prescription.id) }}">
-    <div class="row g-2">
-      <div class="col-md-5">
-        <input type="text" name="medicine" class="form-control" placeholder="Medicine name" required>
-      </div>
-      <div class="col-md-2">
-        <input type="text" name="dosage" class="form-control" placeholder="Dosage (e.g., 500mg)">
-      </div>
-      <div class="col-md-3">
-        <input type="text" name="duration" class="form-control" placeholder="Duration (e.g., 5 days)">
-      </div>
-      <div class="col-md-1">
-        <input type="number" name="quantity" class="form-control" placeholder="Qty">
-      </div>
-      <div class="col-md-1">
-        <button class="btn btn-primary" type="submit">Add</button>
-      </div>
-    </div>
+  <form method="POST" action="{{ url_for('doctor.prescription_detail', prescription_id=prescription.id) }}" class="hms-add-medicine no-print mt-4">
+    <div class="hms-kicker mb-2">Add medicine</div><div class="row g-2"><div class="col-lg-3"><input type="text" name="medicine" class="form-control" placeholder="Medicine" required></div><div class="col-lg-2"><input type="text" name="dosage" class="form-control" placeholder="500 mg"></div><div class="col-lg-2"><input type="text" name="frequency" class="form-control" placeholder="1-0-1 / twice daily"></div><div class="col-lg-2"><input type="text" name="duration" class="form-control" placeholder="5 days"></div><div class="col-lg-1"><input type="number" min="1" name="quantity" class="form-control" placeholder="Qty"></div><div class="col-lg-2"><input type="text" name="instructions" class="form-control" placeholder="After food"></div></div><button class="btn btn-primary btn-sm mt-2" type="submit"><i class="bi bi-plus-lg me-1"></i>Add medicine</button>
   </form>
 
-  <div class="mt-3">
-    <a href="{{ url_for('doctor.prescriptions') }}" class="btn btn-secondary">Back to Prescriptions</a>
-    <form method="POST" action="{{ url_for('doctor.delete_prescription', prescription_id=prescription.id) }}" class="d-inline ms-2">
-      <button type="submit" class="btn btn-danger" onclick="return confirm('Delete this prescription? This cannot be undone.')">Delete Prescription</button>
-    </form>
-  </div>
-</div>
+  <div class="hms-rx-footer"><span><i class="bi bi-calendar-check me-1"></i>Follow-up: {{ prescription.follow_up_date.strftime('%d %b %Y') if prescription.follow_up_date else 'As advised' }}</span><span>Dr. {{ prescription.appointment.doctor.name if prescription.appointment.doctor else 'Doctor' }}</span></div>
+</section>
+<div class="no-print d-flex gap-2 mt-3"><a href="{{ url_for('doctor.prescriptions') }}" class="btn btn-outline-primary">Back</a><form method="POST" action="{{ url_for('doctor.delete_prescription', prescription_id=prescription.id) }}"><button class="btn btn-outline-danger" onclick="return confirm('Delete this prescription?')">Delete prescription</button></form></div>
 {% endblock %}

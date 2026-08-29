@@ -1,0 +1,79 @@
+{% extends 'layout.html' %}
+{% block title %}Appointment #{{ appointment.id }}{% endblock %}
+{% block page_title %}Appointment details{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="hms-kicker">Visit #{{ appointment.id }}</div>
+    <h2 class="page-title">{{ appointment.date.strftime('%d %B %Y') }} · {{ appointment.date.strftime('%I:%M %p') }}</h2>
+    <p class="page-subtitle">A complete view of the consultation, status, clinical notes and prescription.</p>
+  </div>
+  <span class="badge fs-6 {% if appointment.status == 'Pending' %}bg-warning{% elif appointment.status == 'Confirmed' %}bg-success{% elif appointment.status == 'Cancelled' %}bg-danger{% else %}bg-primary{% endif %}">{{ appointment.status }}</span>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-8">
+    <section class="hms-panel mb-4">
+      <div class="hms-panel-head"><div><div class="hms-kicker">Visit summary</div><h3>Consultation information</h3></div><i class="bi bi-clipboard2-pulse"></i></div>
+      <div class="hms-detail-grid">
+        <div><span>Patient</span><strong>{{ appointment.patient.name if appointment.patient else '—' }}</strong></div>
+        <div><span>Doctor</span><strong>Dr. {{ appointment.doctor.name if appointment.doctor else '—' }}</strong></div>
+        <div><span>Date & time</span><strong>{{ appointment.date.strftime('%d %b %Y · %I:%M %p') }}</strong></div>
+        <div><span>Status</span><strong>{{ appointment.status }}</strong></div>
+      </div>
+      <div class="hms-clinical-block mt-4"><span>Reason / symptoms</span><p>{{ appointment.reason }}</p></div>
+      <div class="hms-clinical-block"><span>Consultation notes</span><p>{{ appointment.notes or 'No consultation notes recorded yet.' }}</p></div>
+    </section>
+
+    {% if prescription %}
+    <section class="hms-panel hms-rx-summary">
+      <div class="hms-panel-head"><div><div class="hms-kicker">Prescription</div><h3>Clinical outcome</h3></div><i class="bi bi-file-earmark-medical"></i></div>
+      <div class="hms-clinical-block"><span>Diagnosis</span><p>{{ prescription.diagnosis }}</p></div>
+      {% if prescription.advice %}<div class="hms-clinical-block"><span>Doctor advice</span><p>{{ prescription.advice }}</p></div>{% endif %}
+      <div class="d-flex flex-wrap gap-2 align-items-center mt-3">
+        <span class="hms-rx-pill"><i class="bi bi-capsule"></i>{{ prescription.items|length }} medicine{{ '' if prescription.items|length == 1 else 's' }}</span>
+        {% if prescription.follow_up_date %}<span class="hms-rx-pill"><i class="bi bi-calendar-check"></i>Follow-up {{ prescription.follow_up_date.strftime('%d %b %Y') }}</span>{% endif %}
+      </div>
+      <div class="mt-3">
+        {% if viewer_role == 'Doctor' %}<a class="btn btn-primary btn-sm" href="{{ url_for('doctor.prescription_detail', prescription_id=prescription.id) }}"><i class="bi bi-pencil-square me-1"></i>Open prescription</a>
+        {% else %}<a class="btn btn-primary btn-sm" href="{{ url_for('patient.prescription_detail', prescription_id=prescription.id) }}"><i class="bi bi-file-earmark-medical me-1"></i>View prescription</a>{% endif %}
+      </div>
+    </section>
+    {% elif appointment.status in ['Confirmed','Completed'] and viewer_role == 'Doctor' %}
+    <section class="hms-panel hms-empty-clinical"><i class="bi bi-prescription2"></i><div><strong>No prescription yet</strong><p>Create a structured prescription for this consultation.</p></div><a class="btn btn-primary btn-sm" href="{{ url_for('doctor.new_prescription', appointment_id=appointment.id) }}">Create prescription</a></section>
+    {% endif %}
+  </div>
+
+  <div class="col-xl-4">
+    {% if viewer_role == 'Doctor' %}
+    <section class="hms-panel mb-4">
+      <div class="hms-panel-head"><div><div class="hms-kicker">Clinical note</div><h3>Doctor notes</h3></div><i class="bi bi-journal-text"></i></div>
+      <form method="POST" action="{{ url_for('doctor.update_appointment_notes', appointment_id=appointment.id) }}">
+        <textarea name="notes" class="form-control" rows="5" placeholder="Examination findings, observations, follow-up context...">{{ appointment.notes or '' }}</textarea>
+        <button class="btn btn-outline-primary btn-sm mt-2" type="submit">Save notes</button>
+      </form>
+    </section>
+    {% if appointment.status in ['Pending','Confirmed'] %}
+    <section class="hms-panel">
+      <div class="hms-panel-head"><div><div class="hms-kicker">Workflow</div><h3>Update visit status</h3></div><i class="bi bi-arrow-repeat"></i></div>
+      <form action="{{ url_for('doctor.update_appointment_status', appointment_id=appointment.id) }}" method="POST" class="d-grid gap-2">
+        <input type="hidden" name="notes" value="{{ appointment.notes or '' }}">
+        {% if appointment.status == 'Pending' %}<button name="status" value="Confirmed" class="btn btn-success"><i class="bi bi-check2 me-1"></i>Confirm appointment</button>{% endif %}
+        {% if appointment.status == 'Confirmed' %}<button name="status" value="Completed" class="btn btn-primary"><i class="bi bi-check2-circle me-1"></i>Mark completed</button>{% endif %}
+        <button name="status" value="Cancelled" class="btn btn-outline-danger" onclick="return confirm('Cancel this appointment?')">Cancel appointment</button>
+      </form>
+    </section>
+    {% endif %}
+    {% else %}
+    <section class="hms-panel">
+      <div class="hms-panel-head"><div><div class="hms-kicker">Visit status</div><h3>What happens next</h3></div><i class="bi bi-info-circle"></i></div>
+      {% if appointment.status == 'Pending' %}<p class="text-muted small">Your request is waiting for the doctor to confirm it.</p>
+      {% elif appointment.status == 'Confirmed' %}<p class="text-muted small">Your appointment is confirmed. Please arrive on time.</p>
+      {% elif appointment.status == 'Completed' %}<p class="text-muted small">This consultation is complete. Your prescription and notes are stored in your medical history.</p>
+      {% else %}<p class="text-muted small">This appointment was cancelled.</p>{% endif %}
+      {% if appointment.status in ['Pending','Confirmed'] and appointment.date > now %}<form method="POST" action="{{ url_for('patient.cancel_appointment', appointment_id=appointment.id) }}"><button class="btn btn-outline-danger btn-sm" onclick="return confirm('Cancel this appointment?')">Cancel appointment</button></form>{% endif %}
+    </section>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

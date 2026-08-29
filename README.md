@@ -48,3 +48,15 @@ This deletes/recreates `instance/hms.db`, seeds the accounts below, and publishe
 - Blocked availability windows remove overlapping slots
 - Existing appointments automatically remove occupied slots
 - Server-side validation prevents stale/double-booked slot submissions
+
+## Phase 2 clinical workflow added
+
+- Unified appointment detail page for both Doctor and Patient portals
+- Doctor consultation notes stored with each visit
+- Structured prescription: diagnosis, advice and optional follow-up date
+- Medicine details: dosage, frequency, duration, quantity and instructions
+- Printable digital prescription layout
+- Patient read-only prescription view
+- Chronological medical timeline with status, notes, diagnosis and prescription links
+- Doctor-facing patient clinical timeline
+- Existing SQLite databases are upgraded automatically with additive nullable columns; no reset is required

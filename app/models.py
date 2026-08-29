@@ -58,7 +58,10 @@ class Prescription(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     appointment_id = db.Column(db.Integer, db.ForeignKey('appointment.id'), nullable=False)
     diagnosis = db.Column(db.Text, nullable=False)
+    advice = db.Column(db.Text, nullable=True)
+    follow_up_date = db.Column(db.Date, nullable=True)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
 
    
     appointment = db.relationship('Appointment', backref=db.backref('prescriptions', lazy=True))
@@ -70,8 +73,10 @@ class PrescriptionItem(db.Model):
     prescription_id = db.Column(db.Integer, db.ForeignKey('prescription.id'), nullable=False)
     medicine = db.Column(db.String(200), nullable=False)
     dosage = db.Column(db.String(100), nullable=True)
+    frequency = db.Column(db.String(100), nullable=True)
     duration = db.Column(db.String(100), nullable=True)
     quantity = db.Column(db.Integer, nullable=True)
+    instructions = db.Column(db.String(255), nullable=True)
 
 
 class DoctorAvailability(db.Model):
