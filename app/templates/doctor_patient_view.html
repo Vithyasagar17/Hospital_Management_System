@@ -1,19 +1,28 @@
 {% extends 'layout.html' %}
-
+{% block title %}Patient profile{% endblock %}
+{% block page_title %}Patient profile{% endblock %}
 {% block content %}
 <div class="container mt-4">
-  <h2>Patient Profile</h2>
-  <div class="card">
-    <div class="card-body">
-  <h4 class="card-title">{{ patient.name or 'Unknown' }}</h4>
-      <p class="card-text"><strong>Age:</strong> {{ patient.age or '-' }}</p>
-      <p class="card-text"><strong>Gender:</strong> {{ patient.gender or '-' }}</p>
-      <p class="card-text"><strong>Height:</strong> {{ patient.height or '-' }} cm</p>
-      <p class="card-text"><strong>Weight:</strong> {{ patient.weight or '-' }} kg</p>
-      <p class="card-text"><strong>Contact:</strong> {{ patient.contact or '-' }}</p>
-      <p class="card-text"><strong>Address:</strong> {{ patient.address or '-' }}</p>
+  <div class="page-header"><div><h2 class="page-title">Patient profile</h2><p class="page-subtitle">Basic patient information available for clinical context.</p></div></div>
+  <div class="card hms-profile-card">
+    <div class="card-body p-4">
+      <div class="hms-profile-head">
+        <div class="hms-profile-icon" style="color:#0f9f92;background:#e7f8f5;"><i class="bi bi-person-vcard"></i></div>
+        <div><h3 class="mb-1" style="font-size:1.25rem;">{{ patient.name or 'Unknown patient' }}</h3><div class="text-muted" style="font-size:.8rem;">Patient ID {{ patient.id }}</div></div>
+      </div>
+      <div class="hms-detail-list">
+        <div class="hms-detail-row"><strong>Age</strong><span>{{ patient.age or '—' }}</span></div>
+        <div class="hms-detail-row"><strong>Gender</strong><span>{{ patient.gender or '—' }}</span></div>
+        <div class="hms-detail-row"><strong>Height</strong><span>{{ (patient.height ~ ' cm') if patient.height else '—' }}</span></div>
+        <div class="hms-detail-row"><strong>Weight</strong><span>{{ (patient.weight ~ ' kg') if patient.weight else '—' }}</span></div>
+        <div class="hms-detail-row"><strong>Contact</strong><span>{{ patient.contact or '—' }}</span></div>
+        <div class="hms-detail-row"><strong>Address</strong><span>{{ patient.address or '—' }}</span></div>
+      </div>
+      <div class="d-flex flex-wrap gap-2 mt-4">
+        <a href="{{ url_for('doctor.view_patient_history', patient_id=patient.id) }}" class="btn btn-primary"><i class="bi bi-clock-history me-1"></i> View history</a>
+        <a href="{{ url_for('doctor.doctor_patients') }}" class="btn btn-outline-primary"><i class="bi bi-arrow-left me-1"></i> Back to patients</a>
+      </div>
     </div>
   </div>
-  <a href="{{ url_for('doctor.doctor_patients') }}" class="btn btn-link mt-3">Back to patients</a>
 </div>
 {% endblock %}

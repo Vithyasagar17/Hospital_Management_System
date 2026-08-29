@@ -1,9 +1,9 @@
 from flask import Blueprint, render_template, abort, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 from app.routes.auth_decorator import role_required
-from app.models import Doctor, Patient, Appointment, Prescription, PrescriptionItem
+from app.models import Doctor, Patient, Appointment, Prescription, PrescriptionItem, DoctorAvailability
 from app import db
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 doctor_bp = Blueprint('doctor', __name__, url_prefix='/doctor')
@@ -183,13 +183,103 @@ def update_appointment_status(appointment_id):
     status = request.form.get('status')
     notes = request.form.get('notes')
     
-    if status in ['Confirmed', 'Completed', 'Cancelled']:
-        appointment.status = status
-        if notes:
-            appointment.notes = notes
-        appointment.updated_at = datetime.utcnow()
-        db.session.commit()
-    else:
-        flash('Invalid status value.', 'error')
+    # Valid status transitions
+    valid_transitions = {
+        'Pending': ['Confirmed', 'Cancelled'],
+        'Confirmed': ['Completed', 'Cancelled'],
+        'Completed': [],
+        'Cancelled': []
+    }
+    
+    if appointment.status not in valid_transitions or status not in valid_transitions.get(appointment.status, []):
+        flash('Invalid status transition.', 'error')
+        return redirect(url_for('doctor.view_appointments'))
+    
+    appointment.status = status
+    if notes:
+        appointment.notes = notes
+    appointment.updated_at = datetime.utcnow()
+    db.session.commit()
     
     return redirect(url_for('doctor.view_appointments'))
+
+
+@doctor_bp.route('/availability', methods=['GET', 'POST'])
+@login_required
+@role_required('Doctor')
+def manage_availability():
+    doctor = Doctor.query.filter_by(id=current_user.id).first()
+    
+    if request.method == 'POST':
+        date_str = request.form.get('date')
+        start_time = request.form.get('start_time')
+        end_time = request.form.get('end_time')
+        is_available = request.form.get('is_available') == 'on'
+        
+        try:
+            date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            
+            if date < datetime.now().date():
+                flash('Cannot set availability for past dates.', 'warning')
+                return redirect(url_for('doctor.manage_availability'))
+            
+            if date > (datetime.now().date() + timedelta(days=7)):
+                flash('Cannot set availability beyond 7 days.', 'warning')
+                return redirect(url_for('doctor.manage_availability'))
+            
+            availability = DoctorAvailability.query.filter_by(
+                doctor_id=doctor.id,
+                date=date,
+                start_time=start_time,
+                end_time=end_time
+            ).first()
+            
+            if availability:
+                availability.is_available = is_available
+            else:
+                availability = DoctorAvailability(
+                    doctor_id=doctor.id,
+                    date=date,
+                    start_time=start_time,
+                    end_time=end_time,
+                    is_available=is_available
+                )
+                db.session.add(availability)
+            
+            db.session.commit()
+            flash('Availability updated successfully.', 'success')
+            
+        except ValueError:
+            flash('Invalid date or time format.', 'error')
+        
+        return redirect(url_for('doctor.manage_availability'))
+    
+    # Get availability for next 7 days
+    today = datetime.now().date()
+    next_week = today + timedelta(days=7)
+    
+    availabilities = DoctorAvailability.query.filter(
+        DoctorAvailability.doctor_id == doctor.id,
+        DoctorAvailability.date >= today,
+        DoctorAvailability.date <= next_week
+    ).order_by(DoctorAvailability.date).all()
+    
+    return render_template('doctor_availability.html', availabilities=availabilities)
+
+
+@doctor_bp.route('/patient/<int:patient_id>/history')
+@login_required
+@role_required('Doctor')
+def view_patient_history(patient_id):
+    patient = Patient.query.filter_by(id=patient_id).first()
+    if not patient:
+        abort(404)
+    
+    # Get all completed appointments for this patient with the current doctor
+    appointments = Appointment.query.filter(
+        Appointment.patient_id == patient_id,
+        Appointment.doctor_id == current_user.id,
+        Appointment.status == 'Completed'
+    ).order_by(Appointment.date.desc()).all()
+    
+    return render_template('doctor_patient_history.html', patient=patient, appointments=appointments)

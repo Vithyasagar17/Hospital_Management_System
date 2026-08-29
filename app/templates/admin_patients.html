@@ -1,8 +1,26 @@
 {% extends 'layout.html' %}
 
+{% block title %}Patients{% endblock %}
+{% block page_title %}Patients{% endblock %}
 {% block content %}
 <div class="container mt-4">
-  <h2>Manage Patients</h2>
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Manage Patients</h2>
+    <a href="{{ url_for('admin.search') }}" class="btn btn-primary">Search Patients</a>
+  </div>
+
+  <ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item" role="presentation">
+      <a class="nav-link {% if status == 'active' %}active{% endif %}" href="{{ url_for('admin.admin_patients', status='active') }}">
+        Active Patients
+      </a>
+    </li>
+    <li class="nav-item" role="presentation">
+      <a class="nav-link {% if status == 'blacklisted' %}active{% endif %}" href="{{ url_for('admin.admin_patients', status='blacklisted') }}">
+        Blacklisted Patients
+      </a>
+    </li>
+  </ul>
 
   <div class="table-responsive mt-3">
     <table class="table table-bordered table-striped">
@@ -13,6 +31,7 @@
           <th>Contact</th>
           <th>Age</th>
           <th>Address</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -23,6 +42,18 @@
           <td>{{ p.contact or '—' }}</td>
           <td>{{ p.age or '—' }}</td>
           <td>{{ p.address or '—' }}</td>
+          <td>
+            {% if status == 'active' %}
+              <a href="{{ url_for('admin.edit_patient', patient_id=p.id) }}" class="btn btn-sm btn-warning">Edit</a>
+              <form method="POST" action="{{ url_for('admin.blacklist_patient', patient_id=p.id) }}" style="display:inline;">
+                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Blacklist this patient?')">Blacklist</button>
+              </form>
+            {% else %}
+              <form method="POST" action="{{ url_for('admin.unblacklist_patient', patient_id=p.id) }}" style="display:inline;">
+                <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Unblacklist this patient?')">Unblacklist</button>
+              </form>
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -30,7 +61,7 @@
   </div>
 
   {% if not patients %}
-  <div class="alert alert-info">No patients found.</div>
+  <div class="alert alert-info">No {% if status == 'blacklisted' %}blacklisted{% else %}active{% endif %} patients found.</div>
   {% endif %}
 </div>
 {% endblock %}

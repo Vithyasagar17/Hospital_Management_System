@@ -1,0 +1,97 @@
+{% extends 'layout.html' %}
+
+{% block title %}Search{% endblock %}
+{% block page_title %}Search records{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h2>Search</h2>
+
+  <form method="GET" action="{{ url_for('admin.search') }}" class="mb-4">
+    <div class="form-row">
+      <div class="form-group col-md-8">
+        <input type="text" class="form-control" name="q" placeholder="Search by name, ID, contact, or specialization..." value="{{ query or '' }}">
+      </div>
+      <div class="form-group col-md-2">
+        <select class="form-control" name="type">
+          <option value="all" {% if search_type == 'all' %}selected{% endif %}>All</option>
+          <option value="doctor" {% if search_type == 'doctor' %}selected{% endif %}>Doctor</option>
+          <option value="patient" {% if search_type == 'patient' %}selected{% endif %}>Patient</option>
+        </select>
+      </div>
+      <div class="form-group col-md-2">
+        <button type="submit" class="btn btn-primary w-100">Search</button>
+      </div>
+    </div>
+  </form>
+
+  {% if query %}
+    {% if results.doctors %}
+    <h3>Doctors Found ({{ results.doctors|length }})</h3>
+    <div class="table-responsive mb-4">
+      <table class="table table-bordered table-striped">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Specialization</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for doctor in results.doctors %}
+          <tr>
+            <td>{{ doctor.id }}</td>
+            <td>{{ doctor.name or '—' }}</td>
+            <td>{{ doctor.specialization.name if doctor.specialization else '—' }}</td>
+            <td>
+              <a href="{{ url_for('admin.edit_doctor', doctor_id=doctor.id) }}" class="btn btn-sm btn-warning">Edit</a>
+              <form method="POST" action="{{ url_for('admin.blacklist_doctor', doctor_id=doctor.id) }}" style="display:inline;">
+                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Blacklist this doctor?')">Blacklist</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if results.patients %}
+    <h3>Patients Found ({{ results.patients|length }})</h3>
+    <div class="table-responsive mb-4">
+      <table class="table table-bordered table-striped">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Contact</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for patient in results.patients %}
+          <tr>
+            <td>{{ patient.id }}</td>
+            <td>{{ patient.name or '—' }}</td>
+            <td>{{ patient.contact or '—' }}</td>
+            <td>
+              <a href="{{ url_for('admin.edit_patient', patient_id=patient.id) }}" class="btn btn-sm btn-warning">Edit</a>
+              <form method="POST" action="{{ url_for('admin.blacklist_patient', patient_id=patient.id) }}" style="display:inline;">
+                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Blacklist this patient?')">Blacklist</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if not results.doctors and not results.patients %}
+    <div class="alert alert-info">No results found.</div>
+    {% endif %}
+  {% else %}
+    <div class="alert alert-secondary">Enter a search query to find doctors or patients.</div>
+  {% endif %}
+</div>
+{% endblock %}

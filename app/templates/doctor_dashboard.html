@@ -1,65 +1,19 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Doctor Dashboard</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body>
-  <nav class="navbar navbar-expand-lg navbar-dark bg-success">
-    <div class="container-fluid">
-      <a class="navbar-brand" href="#">HMS - Doctor</a>
-      <div class="d-flex">
-        <a href="{{ url_for('auth.logout') }}" class="btn btn-light btn-sm">Logout</a>
-      </div>
-    </div>
-  </nav>
+{% extends 'layout.html' %}
+{% block title %}Doctor dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block content %}
+<section class="hms-dashboard-hero">
+  <div class="hms-kicker">Clinical workspace</div>
+  <h2>Welcome, Dr. {{ doctor_name }}.</h2>
+  <p>Stay focused on patient care with quick access to appointments, records, prescriptions, and your working availability.</p>
+</section>
 
-  <div class="container mt-4">
-  <h2 class="text-center mb-4">Welcome {{ doctor_name }}!</h2>
-  {% if needs_profile %}
-  <div class="alert alert-warning text-center" role="alert">
-    Your profile is incomplete — please <a href="{{ url_for('doctor.doctor_profile') }}" class="alert-link">complete your profile</a> so your full name is displayed.
-  </div>
-  {% endif %}
+{% if needs_profile %}<div class="alert alert-warning"><i class="bi bi-exclamation-triangle-fill me-2"></i>Your profile is incomplete — please <a href="{{ url_for('doctor.doctor_profile') }}" class="alert-link">complete your profile</a> so your full name is displayed.</div>{% endif %}
 
-    <div class="row g-4">
-      <div class="col-md-4">
-        <div class="card shadow-sm border-success">
-          <div class="card-body">
-            <h5 class="card-title">Appointments</h5>
-            <p class="card-text">View and manage all your patient appointments.</p>
-            <a href="{{ url_for('doctor.view_appointments') }}" class="btn btn-success">Manage</a>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-md-4">
-        <div class="card shadow-sm border-primary">
-          <div class="card-body">
-            <h5 class="card-title">Patient Records</h5>
-            <p class="card-text">Access your patients’ details and past treatments.</p>
-            <a href="{{ url_for('doctor.doctor_patients') }}" class="btn btn-primary">Open Records</a>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-md-4">
-        <div class="card shadow-sm border-warning">
-          <div class="card-body">
-            <h5 class="card-title">Prescriptions</h5>
-            <p class="card-text">Manage prescriptions and medical advice for patients.</p>
-            <a href="{{ url_for('doctor.prescriptions') }}" class="btn btn-warning">Manage</a>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <footer class="text-center text-muted mt-5">
-    <p>© 2025 Hospital Management System | Doctor Portal</p>
-  </footer>
-</body>
-</html>
+<div class="row g-4 hms-action-grid">
+  <div class="col-md-6 col-xl-4"><div class="hms-action-card" style="--accent:#168a5b;--soft:#e8f7f0;"><div class="hms-icon"><i class="bi bi-calendar2-week"></i></div><div><h3>Appointments</h3><p>Review visits and update appointment status or notes.</p></div><a href="{{ url_for('doctor.view_appointments') }}" class="btn btn-success">Manage visits</a></div></div>
+  <div class="col-md-6 col-xl-4"><div class="hms-action-card" style="--accent:#5b5ce2;--soft:#eeefff;"><div class="hms-icon"><i class="bi bi-people"></i></div><div><h3>Patient records</h3><p>Access patient profiles and their clinical history.</p></div><a href="{{ url_for('doctor.doctor_patients') }}" class="btn btn-primary">Open records</a></div></div>
+  <div class="col-md-6 col-xl-4"><div class="hms-action-card" style="--accent:#c9781b;--soft:#fff4df;"><div class="hms-icon"><i class="bi bi-capsule-pill"></i></div><div><h3>Prescriptions</h3><p>Create and maintain prescriptions linked to appointments.</p></div><a href="{{ url_for('doctor.prescriptions') }}" class="btn btn-warning">Manage</a></div></div>
+  <div class="col-md-6 col-xl-4"><div class="hms-action-card" style="--accent:#0f9f92;--soft:#e7f8f5;"><div class="hms-icon"><i class="bi bi-clock-history"></i></div><div><h3>Availability</h3><p>Set the days and time windows patients can book.</p></div><a href="{{ url_for('doctor.manage_availability') }}" class="btn btn-outline-primary">Set hours</a></div></div>
+</div>
+{% endblock %}

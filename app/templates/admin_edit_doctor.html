@@ -1,0 +1,31 @@
+{% extends 'layout.html' %}
+
+{% block title %}Edit doctor{% endblock %}
+{% block page_title %}Edit doctor{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h2>Edit Doctor</h2>
+
+  <form method="POST" class="mt-4">
+    <div class="form-group mb-3">
+      <label for="name" class="form-label">Full Name</label>
+      <input type="text" class="form-control" id="name" name="name" value="{{ doctor.name or '' }}" required>
+    </div>
+
+    <div class="form-group mb-3">
+      <label for="specialization_id" class="form-label">Specialization</label>
+      <select class="form-control" id="specialization_id" name="specialization_id">
+        <option value="">-- Select Specialization --</option>
+        {% for spec in specializations %}
+        <option value="{{ spec.id }}" {% if doctor.specialization_id == spec.id %}selected{% endif %}>{{ spec.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <button type="submit" class="btn btn-primary">Update Doctor</button>
+      <a href="{{ url_for('admin.admin_doctors') }}" class="btn btn-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

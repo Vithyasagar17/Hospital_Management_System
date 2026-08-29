@@ -1,5 +1,7 @@
 {% extends 'layout.html' %}
 
+{% block title %}Prescription details{% endblock %}
+{% block page_title %}Prescription details{% endblock %}
 {% block content %}
 <div class="container mt-4">
   <h2>Prescription #{{ prescription.id }}</h2>
@@ -29,6 +31,7 @@
           <th>Dosage</th>
           <th>Duration</th>
           <th>Quantity</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>

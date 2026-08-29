@@ -1,0 +1,82 @@
+{% extends 'layout.html' %}
+
+{% block title %}Find doctors{% endblock %}
+{% block page_title %}Find doctors{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h2>Search Doctors</h2>
+
+  <form method="GET" action="{{ url_for('patient.search_doctors') }}" class="mb-4">
+    <div class="form-row">
+      <div class="form-group col-md-8">
+        <input type="text" class="form-control" name="q" placeholder="Search by doctor name or specialization..." value="{{ query or '' }}">
+      </div>
+      <div class="form-group col-md-2">
+        <select class="form-control" name="type">
+          <option value="all" {% if search_type == 'all' %}selected{% endif %}>All</option>
+          <option value="doctor" {% if search_type == 'doctor' %}selected{% endif %}>Doctor</option>
+          <option value="specialization" {% if search_type == 'specialization' %}selected{% endif %}>Specialization</option>
+        </select>
+      </div>
+      <div class="form-group col-md-2">
+        <button type="submit" class="btn btn-primary w-100">Search</button>
+      </div>
+    </div>
+  </form>
+
+  {% if query %}
+    {% if results.doctors %}
+    <h3>Doctors Found ({{ results.doctors|length }})</h3>
+    <div class="row mb-4">
+      {% for doctor in results.doctors %}
+      <div class="col-md-6 mb-3">
+        <div class="card">
+          <div class="card-body">
+            <h5 class="card-title">{{ doctor.name }}</h5>
+            <p class="card-text">
+              <strong>Specialization:</strong> {{ doctor.specialization.name if doctor.specialization else 'Not specified' }}<br>
+              <strong>ID:</strong> {{ doctor.id }}
+            </p>
+            <a href="{{ url_for('patient.view_doctor_profile', doctor_id=doctor.id) }}" class="btn btn-sm btn-primary">View Profile</a>
+            <a href="{{ url_for('patient.book_appointment') }}" class="btn btn-sm btn-success">Book Appointment</a>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if results.specializations %}
+    <h3>Specializations Found</h3>
+    <div class="row mb-4">
+      {% for spec in results.specializations %}
+      <div class="col-md-6 mb-3">
+        <div class="card">
+          <div class="card-body">
+            <h5 class="card-title">{{ spec.name }}</h5>
+            <p class="card-text">{{ spec.description or 'No description' }}</p>
+            <p><strong>Doctors:</strong> {{ spec.doctors|length }}</p>
+            {% if spec.doctors %}
+              <ul class="list-group list-group-flush">
+                {% for doctor in spec.doctors %}
+                  {% if not doctor.is_blacklisted %}
+                  <li class="list-group-item"><a href="{{ url_for('patient.view_doctor_profile', doctor_id=doctor.id) }}">{{ doctor.name }}</a></li>
+                  {% endif %}
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if not results.doctors and not results.specializations %}
+    <div class="alert alert-info">No results found.</div>
+    {% endif %}
+  {% else %}
+    <div class="alert alert-secondary">Enter a search query to find doctors or specializations.</div>
+  {% endif %}
+</div>
+{% endblock %}

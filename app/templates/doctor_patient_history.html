@@ -1,0 +1,50 @@
+{% extends 'layout.html' %}
+
+{% block title %}Patient history{% endblock %}
+{% block page_title %}Patient history{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h2>Patient History - {{ patient.name }}</h2>
+
+  {% if appointments %}
+  <div class="table-responsive mt-3">
+    <table class="table table-bordered table-striped">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Time</th>
+          <th>Reason</th>
+          <th>Notes</th>
+          <th>Prescriptions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for appt in appointments %}
+        <tr>
+          <td>{{ appt.date.strftime('%Y-%m-%d') }}</td>
+          <td>{{ appt.time }}</td>
+          <td>{{ appt.reason }}</td>
+          <td>{{ appt.notes or '—' }}</td>
+          <td>
+            {% if appt.prescriptions %}
+              <ul>
+              {% for rx in appt.prescriptions %}
+                <li>{{ rx.diagnosis }}</li>
+              {% endfor %}
+              </ul>
+            {% else %}
+              —
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="alert alert-info">No completed appointments found for this patient.</div>
+  {% endif %}
+
+  <a href="{{ url_for('doctor.doctor_patients') }}" class="btn btn-secondary mt-3">Back to Patients</a>
+</div>
+{% endblock %}

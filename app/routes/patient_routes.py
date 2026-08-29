@@ -1,7 +1,7 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import login_required, current_user
 from app.routes.auth_decorator import role_required
-from app.models import Patient, Doctor, Appointment
+from app.models import Patient, Doctor, Appointment, Specialization
 from app import db
 from datetime import datetime
 
@@ -76,7 +76,7 @@ def medical_history():
 @role_required('Patient')
 def book_appointment():
     patient = Patient.query.filter_by(id=current_user.id).first()
-    doctors = Doctor.query.all()
+    doctors = Doctor.query.filter_by(is_blacklisted=False).all()
     
     if request.method == 'POST':
         doctor_id = request.form.get('doctor_id')
@@ -93,6 +93,17 @@ def book_appointment():
             
             if date < datetime.now():
                 flash('Cannot book appointments in the past.', 'error')
+                return redirect(url_for('patient.book_appointment'))
+            
+            # Check for duplicate appointments for the same doctor at the same date/time
+            existing_appointment = Appointment.query.filter(
+                Appointment.doctor_id == doctor_id,
+                Appointment.date == date,
+                Appointment.status != 'Cancelled'
+            ).first()
+            
+            if existing_appointment:
+                flash('This doctor already has an appointment at the selected date and time.', 'error')
                 return redirect(url_for('patient.book_appointment'))
             
             appointment = Appointment(
@@ -123,3 +134,61 @@ def book_appointment():
 def view_appointments():
     appointments = Appointment.query.filter_by(patient_id=current_user.id).order_by(Appointment.date.desc()).all()
     return render_template('view_appointments.html', appointments=appointments)
+
+
+@patient_bp.route('/search-doctors')
+@login_required
+@role_required('Patient')
+def search_doctors():
+    query = request.args.get('q', '').strip()
+    search_type = request.args.get('type', 'all')
+    
+    results = {'doctors': [], 'specializations': []}
+    
+    if query:
+        if search_type in ['all', 'doctor']:
+            # Search by doctor name
+            results['doctors'] = Doctor.query.filter(
+                Doctor.name.ilike(f'%{query}%'),
+                Doctor.is_blacklisted == False
+            ).all()
+        
+        if search_type in ['all', 'specialization']:
+            # Search by specialization
+            results['specializations'] = Specialization.query.filter(
+                Specialization.name.ilike(f'%{query}%')
+            ).all()
+    
+    return render_template('patient_search_doctors.html', results=results, query=query, search_type=search_type)
+
+
+@patient_bp.route('/doctor/<int:doctor_id>/profile')
+@login_required
+@role_required('Patient')
+def view_doctor_profile(doctor_id):
+    doctor = Doctor.query.filter_by(id=doctor_id, is_blacklisted=False).first()
+    if not doctor:
+        abort(404)
+    
+    return render_template('patient_view_doctor_profile.html', doctor=doctor)
+
+
+@patient_bp.route('/appointment/<int:appointment_id>/cancel', methods=['POST'])
+@login_required
+@role_required('Patient')
+def cancel_appointment(appointment_id):
+    appointment = Appointment.query.get_or_404(appointment_id)
+    
+    if appointment.patient_id != current_user.id:
+        abort(403)
+    
+    if appointment.status == 'Completed':
+        flash('Cannot cancel completed appointments.', 'error')
+        return redirect(url_for('patient.view_appointments'))
+    
+    appointment.status = 'Cancelled'
+    appointment.updated_at = datetime.utcnow()
+    db.session.commit()
+    
+    flash('Appointment cancelled successfully.', 'success')
+    return redirect(url_for('patient.view_appointments'))

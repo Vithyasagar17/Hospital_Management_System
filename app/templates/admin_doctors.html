@@ -1,8 +1,26 @@
 {% extends 'layout.html' %}
 
+{% block title %}Doctors{% endblock %}
+{% block page_title %}Doctors{% endblock %}
 {% block content %}
 <div class="container mt-4">
-  <h2>Manage Doctors</h2>
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Manage Doctors</h2>
+    <a href="{{ url_for('admin.add_doctor') }}" class="btn btn-success">+ Add Doctor</a>
+  </div>
+
+  <ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item" role="presentation">
+      <a class="nav-link {% if status == 'active' %}active{% endif %}" href="{{ url_for('admin.admin_doctors', status='active') }}">
+        Active Doctors
+      </a>
+    </li>
+    <li class="nav-item" role="presentation">
+      <a class="nav-link {% if status == 'blacklisted' %}active{% endif %}" href="{{ url_for('admin.admin_doctors', status='blacklisted') }}">
+        Blacklisted Doctors
+      </a>
+    </li>
+  </ul>
 
   <div class="table-responsive mt-3">
     <table class="table table-bordered table-striped">
@@ -11,7 +29,8 @@
           <th>ID</th>
           <th>Name</th>
           <th>Specialization</th>
-          <th>Username (user id)</th>
+          <th>Username</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -21,6 +40,18 @@
           <td>{{ d.name or '—' }}</td>
           <td>{{ d.specialization.name if d.specialization else '—' }}</td>
           <td>{{ d.id }}</td>
+          <td>
+            {% if status == 'active' %}
+              <a href="{{ url_for('admin.edit_doctor', doctor_id=d.id) }}" class="btn btn-sm btn-warning">Edit</a>
+              <form method="POST" action="{{ url_for('admin.blacklist_doctor', doctor_id=d.id) }}" style="display:inline;">
+                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Blacklist this doctor?')">Blacklist</button>
+              </form>
+            {% else %}
+              <form method="POST" action="{{ url_for('admin.unblacklist_doctor', doctor_id=d.id) }}" style="display:inline;">
+                <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Unblacklist this doctor?')">Unblacklist</button>
+              </form>
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -28,7 +59,7 @@
   </div>
 
   {% if not doctors %}
-  <div class="alert alert-info">No doctors found.</div>
+  <div class="alert alert-info">No {% if status == 'blacklisted' %}blacklisted{% else %}active{% endif %} doctors found.</div>
   {% endif %}
 </div>
 {% endblock %}

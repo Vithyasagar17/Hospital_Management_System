@@ -1,6 +1,6 @@
 import os
 from app import create_app, db
-from app.models import User, Specialization, Doctor, Patient
+from app.models import User, Specialization, Doctor, Patient, DoctorAvailability
 
 app = create_app()
 
@@ -32,7 +32,6 @@ with app.app_context():
             try:
                 db.session.execute(text(f"ALTER TABLE appointment ADD COLUMN {col} {sqltype}"))
             except Exception as e:
-                # Could not add column; keep original exception handling but avoid printing
                 _ = e
     db.session.commit()
 
@@ -46,6 +45,7 @@ with app.app_context():
         'gender': 'VARCHAR(20)',
         'height': 'REAL',
         'weight': 'REAL',
+        'is_blacklisted': 'BOOLEAN',
     }
 
     for col, sqltype in extras.items():
@@ -53,7 +53,23 @@ with app.app_context():
             try:
                 db.session.execute(text(f"ALTER TABLE patient ADD COLUMN {col} {sqltype}"))
             except Exception as e:
-                # Could not add column; keep original exception handling but avoid printing
+                _ = e
+    db.session.commit()
+
+    try:
+        existing_doctor_cols = {row[1] for row in db.session.execute(text("PRAGMA table_info('doctor')")).fetchall()}
+    except Exception:
+        existing_doctor_cols = set()
+
+    doctor_extras = {
+        'is_blacklisted': 'BOOLEAN',
+    }
+
+    for col, sqltype in doctor_extras.items():
+        if col not in existing_doctor_cols:
+            try:
+                db.session.execute(text(f"ALTER TABLE doctor ADD COLUMN {col} {sqltype}"))
+            except Exception as e:
                 _ = e
     db.session.commit()
 
@@ -62,12 +78,22 @@ with app.app_context():
         admin.set_password('supersecretadmin')
         db.session.add(admin)
 
-    if not Specialization.query.filter_by(name='General Medicine').first():
-        specialization = Specialization(name='General Medicine', description='Primary Care')
-        db.session.add(specialization)
-        db.session.commit()
-    else:
-        specialization = Specialization.query.filter_by(name='General Medicine').first()
+    # Create specializations
+    specializations_list = [
+        ('General Medicine', 'Primary Care and General Health'),
+        ('Cardiology', 'Heart and Cardiovascular Health'),
+        ('Neurology', 'Brain and Nervous System'),
+        ('Orthopedics', 'Bones and Joints'),
+        ('Pediatrics', 'Children Health'),
+        ('Dermatology', 'Skin Health'),
+    ]
+
+    for spec_name, spec_desc in specializations_list:
+        if not Specialization.query.filter_by(name=spec_name).first():
+            specialization = Specialization(name=spec_name, description=spec_desc)
+            db.session.add(specialization)
+    
+    db.session.commit()
 
     if not User.query.filter_by(username='dr_sample').first():
         doctor_user = User(username='dr_sample', role='Doctor')
@@ -75,7 +101,8 @@ with app.app_context():
         db.session.add(doctor_user)
         db.session.commit()
 
-        doctor = Doctor(id=doctor_user.id, name='Alice Smith', specialization_id=specialization.id)
+        gen_med = Specialization.query.filter_by(name='General Medicine').first()
+        doctor = Doctor(id=doctor_user.id, name='Alice Smith', specialization_id=gen_med.id if gen_med else None)
         db.session.add(doctor)
         db.session.commit()
 
@@ -85,9 +112,8 @@ with app.app_context():
         db.session.add(patient_user)
         db.session.commit()
 
-        patient = Patient(id=patient_user.id, name='Kumar', age=35, height=175, weight=75, contact=None, address=None)
+        patient = Patient(id=patient_user.id, name='Kumar', age=35, height=175, weight=75, contact='9876543210', address='123 Main St')
         db.session.add(patient)
         db.session.commit()
 
-    # Sample data ensured (admin + doctor + patient + specialization).
-
+    print("Database created successfully!")

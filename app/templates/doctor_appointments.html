@@ -1,17 +1,10 @@
 {% extends 'layout.html' %}
 
+{% block title %}Appointments{% endblock %}
+{% block page_title %}Appointments{% endblock %}
 {% block content %}
 <div class="container mt-4">
     <h2>My Appointments</h2>
-    
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="alert alert-{{ category }}">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
-
     <div class="table-responsive">
         <table class="table table-striped">
             <thead>

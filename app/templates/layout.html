@@ -1,53 +1,164 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Hospital Management System</title>
-
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111827">
+  <title>{% block title %}HMS{% endblock %} · Hospital Management System</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+  <link rel="icon" href="{{ url_for('static', filename='logo.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {% block extra_head %}{% endblock %}
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-      <div class="container">
-        <a class="navbar-brand d-flex align-items-center" href="#">
-          <img src="{{ url_for('static', filename='logo.svg') }}" alt="HMS" height="36" style="margin-right:8px;">
-          <span class="fw-bold">HMS</span>
-        </a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu">
-          <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navMenu">
-          <ul class="navbar-nav ms-auto">
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('auth.login') }}">Login</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('auth.register') }}">Register</a></li>
-          </ul>
+{% macro flash_messages() %}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="hms-flash-stack" aria-live="polite">
+        {% for category, message in messages %}
+          {% set tone = category if category in ['success','warning','danger','info','secondary'] else 'info' %}
+          <div class="alert alert-{{ tone }} alert-dismissible fade show" role="alert">
+            <div class="d-flex align-items-start gap-2">
+              <i class="bi {% if tone == 'success' %}bi-check-circle-fill{% elif tone == 'warning' %}bi-exclamation-triangle-fill{% elif tone == 'danger' %}bi-x-octagon-fill{% else %}bi-info-circle-fill{% endif %} mt-1"></i>
+              <div>{{ message }}</div>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+{% endmacro %}
+
+{% if current_user.is_authenticated and request.endpoint not in ['auth.login', 'auth.register'] %}
+  {% set role = current_user.role %}
+  <div class="hms-shell">
+    <div class="hms-sidebar-backdrop" id="hmsBackdrop"></div>
+    <aside class="hms-sidebar" id="hmsSidebar">
+      <a class="hms-sidebar-brand" href="{% if role == 'Admin' %}{{ url_for('admin.admin_dashboard') }}{% elif role == 'Doctor' %}{{ url_for('doctor.doctor_dashboard') }}{% else %}{{ url_for('patient.patient_dashboard') }}{% endif %}">
+        <img src="{{ url_for('static', filename='logo.svg') }}" alt="HMS logo">
+        <span>
+          <strong>Medora HMS</strong>
+          <small>Care Management</small>
+        </span>
+      </a>
+
+      <div class="hms-user-card">
+        <div class="hms-avatar">{{ current_user.username[:2]|upper }}</div>
+        <div class="min-w-0">
+          <div class="hms-user-name">{{ current_user.username }}</div>
+          <div class="hms-user-role">{{ role }} workspace</div>
         </div>
       </div>
-    </nav>
 
-    <div class="container my-4">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    {# Map app flash categories to Bootstrap alert classes #}
-                    {% set alert_class = 'alert-info' %}
-                    {% if category == 'success' %}{% set alert_class = 'alert-success' %}{% endif %}
-                    {% if category == 'warning' %}{% set alert_class = 'alert-warning' %}{% endif %}
-                    {% if category == 'danger' %}{% set alert_class = 'alert-danger' %}{% endif %}
-                    <div class="alert {{ alert_class }} alert-dismissible fade show" role="alert">
-                        {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                    </div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
+      <nav class="hms-nav" aria-label="Primary navigation">
+        <div class="hms-nav-label">Workspace</div>
+        {% if role == 'Patient' %}
+          <a class="hms-nav-link {% if request.endpoint == 'patient.patient_dashboard' %}active{% endif %}" href="{{ url_for('patient.patient_dashboard') }}"><i class="bi bi-grid-1x2-fill"></i><span>Dashboard</span></a>
+          <a class="hms-nav-link {% if request.endpoint == 'patient.book_appointment' %}active{% endif %}" href="{{ url_for('patient.book_appointment') }}"><i class="bi bi-calendar2-plus"></i><span>Book appointment</span></a>
+          <a class="hms-nav-link {% if request.endpoint == 'patient.view_appointments' %}active{% endif %}" href="{{ url_for('patient.view_appointments') }}"><i class="bi bi-calendar2-week"></i><span>My appointments</span></a>
+          <a class="hms-nav-link {% if request.endpoint == 'patient.medical_history' %}active{% endif %}" href="{{ url_for('patient.medical_history') }}"><i class="bi bi-clipboard2-pulse"></i><span>Medical history</span></a>
+          <a class="hms-nav-link {% if request.endpoint in ['patient.search_doctors','patient.view_doctor_profile'] %}active{% endif %}" href="{{ url_for('patient.search_doctors') }}"><i class="bi bi-search-heart"></i><span>Find doctors</span></a>
+          <a class="hms-nav-link {% if request.endpoint == 'patient.patient_profile' %}active{% endif %}" href="{{ url_for('patient.patient_profile') }}"><i class="bi bi-person-circle"></i><span>My profile</span></a>
+        {% elif role == 'Doctor' %}
+          <a class="hms-nav-link {% if request.endpoint == 'doctor.doctor_dashboard' %}active{% endif %}" href="{{ url_for('doctor.doctor_dashboard') }}"><i class="bi bi-grid-1x2-fill"></i><span>Dashboard</span></a>
+          <a class="hms-nav-link {% if request.endpoint == 'doctor.view_appointments' %}active{% endif %}" href="{{ url_for('doctor.view_appointments') }}"><i class="bi bi-calendar2-week"></i><span>Appointments</span></a>
+          <a class="hms-nav-link {% if request.endpoint in ['doctor.doctor_patients','doctor.doctor_view_patient','doctor.view_patient_history'] %}active{% endif %}" href="{{ url_for('doctor.doctor_patients') }}"><i class="bi bi-people"></i><span>Patients</span></a>
+          <a class="hms-nav-link {% if request.endpoint in ['doctor.prescriptions','doctor.new_prescription','doctor.prescription_detail'] %}active{% endif %}" href="{{ url_for('doctor.prescriptions') }}"><i class="bi bi-capsule-pill"></i><span>Prescriptions</span></a>
+          <a class="hms-nav-link {% if request.endpoint == 'doctor.manage_availability' %}active{% endif %}" href="{{ url_for('doctor.manage_availability') }}"><i class="bi bi-clock-history"></i><span>Availability</span></a>
+          <a class="hms-nav-link {% if request.endpoint == 'doctor.doctor_profile' %}active{% endif %}" href="{{ url_for('doctor.doctor_profile') }}"><i class="bi bi-person-circle"></i><span>My profile</span></a>
+        {% elif role == 'Admin' %}
+          <a class="hms-nav-link {% if request.endpoint == 'admin.admin_dashboard' %}active{% endif %}" href="{{ url_for('admin.admin_dashboard') }}"><i class="bi bi-grid-1x2-fill"></i><span>Dashboard</span></a>
+          <a class="hms-nav-link {% if request.endpoint in ['admin.admin_doctors','admin.add_doctor','admin.edit_doctor'] %}active{% endif %}" href="{{ url_for('admin.admin_doctors') }}"><i class="bi bi-person-badge"></i><span>Doctors</span></a>
+          <a class="hms-nav-link {% if request.endpoint in ['admin.admin_patients','admin.edit_patient'] %}active{% endif %}" href="{{ url_for('admin.admin_patients') }}"><i class="bi bi-people"></i><span>Patients</span></a>
+          <a class="hms-nav-link {% if request.endpoint == 'admin.admin_appointments' %}active{% endif %}" href="{{ url_for('admin.admin_appointments') }}"><i class="bi bi-calendar2-week"></i><span>Appointments</span></a>
+          <a class="hms-nav-link {% if request.endpoint == 'admin.search' %}active{% endif %}" href="{{ url_for('admin.search') }}"><i class="bi bi-search"></i><span>Search records</span></a>
+          <a class="hms-nav-link {% if request.endpoint == 'admin.admin_overview' %}active{% endif %}" href="{{ url_for('admin.admin_overview') }}"><i class="bi bi-bar-chart-line"></i><span>Overview</span></a>
+        {% endif %}
+      </nav>
+
+      <div class="hms-sidebar-footer">
+        <div class="hms-security-note"><i class="bi bi-shield-check"></i><span>Secure hospital workspace</span></div>
+        <a class="hms-logout" href="{{ url_for('auth.logout') }}"><i class="bi bi-box-arrow-right"></i><span>Sign out</span></a>
+      </div>
+    </aside>
+
+    <div class="hms-main">
+      <header class="hms-topbar">
+        <div class="d-flex align-items-center min-w-0">
+          <button class="hms-sidebar-toggle" id="hmsSidebarToggle" type="button" aria-label="Open navigation"><i class="bi bi-list"></i></button>
+          <div class="hms-heading min-w-0">
+            <div class="hms-eyebrow">{{ role }} portal</div>
+            <h1>{% block page_title %}Hospital Management System{% endblock %}</h1>
+          </div>
+        </div>
+        <div class="hms-topbar-actions">
+          <div class="hms-status"><span></span> System online</div>
+          <div class="hms-avatar hms-avatar-sm">{{ current_user.username[:2]|upper }}</div>
+        </div>
+      </header>
+      <main class="hms-content">
+        {{ flash_messages() }}
+        {% block content %}{% endblock %}
+      </main>
+      <footer class="hms-footer">Medora HMS · Built for clear, coordinated care</footer>
     </div>
+  </div>
+{% else %}
+  <div class="hms-auth-shell">
+    <header class="hms-auth-header">
+      <a href="{{ url_for('auth.login') }}" class="hms-auth-brand">
+        <img src="{{ url_for('static', filename='logo.svg') }}" alt="HMS logo">
+        <span><strong>Medora HMS</strong><small>Hospital Management System</small></span>
+      </a>
+      <div class="hms-auth-trust"><i class="bi bi-shield-lock"></i> Secure care portal</div>
+    </header>
+    <main class="hms-auth-main">
+      <section class="hms-auth-stage">
+        <div class="hms-auth-visual d-none d-lg-flex">
+          <div class="hms-auth-copy">
+            <div class="hms-pill"><i class="bi bi-stars"></i> Modern care operations</div>
+            <h1>Healthcare workflows,<br>made beautifully simple.</h1>
+            <p>Appointments, patient records, prescriptions and hospital administration—organized in one focused workspace.</p>
+            <div class="hms-feature-list">
+              <div><span><i class="bi bi-calendar2-check"></i></span><p><strong>Coordinated scheduling</strong><small>Keep visits and availability clear.</small></p></div>
+              <div><span><i class="bi bi-clipboard2-pulse"></i></span><p><strong>Connected clinical records</strong><small>Find the right patient context quickly.</small></p></div>
+              <div><span><i class="bi bi-shield-check"></i></span><p><strong>Role-based access</strong><small>Purpose-built views for every user.</small></p></div>
+            </div>
+          </div>
+          <div class="hms-orb hms-orb-one"></div><div class="hms-orb hms-orb-two"></div>
+        </div>
+        <div class="hms-auth-panel">
+          <div class="hms-auth-panel-inner">
+            {{ flash_messages() }}
+            {% block auth_content %}{% endblock %}
+            {% block content_anonymous %}{% endblock %}
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="hms-auth-footer">© 2026 Medora HMS · Better systems for better care.</footer>
+  </div>
+{% endif %}
 
-    {% block content %}{% endblock %}
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(() => {
+  const sidebar = document.getElementById('hmsSidebar');
+  const toggle = document.getElementById('hmsSidebarToggle');
+  const backdrop = document.getElementById('hmsBackdrop');
+  const setOpen = (open) => {
+    if (!sidebar || !backdrop) return;
+    sidebar.classList.toggle('open', open);
+    backdrop.classList.toggle('show', open);
+    document.body.classList.toggle('nav-open', open);
+  };
+  toggle?.addEventListener('click', () => setOpen(true));
+  backdrop?.addEventListener('click', () => setOpen(false));
+  window.addEventListener('resize', () => { if (window.innerWidth >= 992) setOpen(false); });
+})();
+</script>
+{% block scripts %}{% endblock %}
 </body>
 </html>

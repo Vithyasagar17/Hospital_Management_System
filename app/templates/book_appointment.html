@@ -1,17 +1,10 @@
 {% extends 'layout.html' %}
 
+{% block title %}Book appointment{% endblock %}
+{% block page_title %}Book appointment{% endblock %}
 {% block content %}
 <div class="container mt-4">
     <h2>Book an Appointment</h2>
-
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="alert alert-{{ category }}">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
-
     <div class="card">
         <div class="card-body">
             <form method="POST" action="{{ url_for('patient.book_appointment') }}">

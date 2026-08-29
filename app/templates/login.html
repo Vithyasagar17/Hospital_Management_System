@@ -1,30 +1,31 @@
 {% extends 'layout.html' %}
+{% block title %}Sign in{% endblock %}
 
-{% block content %}
-<div class="container d-flex align-items-center justify-content-center" style="min-height:65vh;">
-    <div class="card shadow-sm" style="width:100%;max-width:420px;">
-        <div class="card-body">
-            <h3 class="card-title mb-1">Welcome</h3>
-            <p class="text-muted mb-4">Sign in to continue</p>
+{% block auth_content %}
+<div class="hms-auth-kicker">Welcome back</div>
+<h2 class="hms-auth-title">Sign in to your workspace</h2>
+<p class="hms-auth-subtitle">Use your HMS credentials to continue to your personalized portal.</p>
 
-            <form method="POST" action="{{ url_for('auth.login') }}">
-                <div class="mb-3">
-                    <label for="username" class="form-label">Username</label>
-                    <input id="username" name="username" type="text" class="form-control" required autocomplete="username">
-                </div>
-
-                <div class="mb-3">
-                    <label for="password" class="form-label">Password</label>
-                    <input id="password" name="password" type="password" class="form-control" required autocomplete="current-password">
-                </div>
-
-                <div class="d-grid mb-2">
-                    <button type="submit" class="btn btn-primary btn-lg">Sign in</button>
-                </div>
-
-                <p class="text-center text-muted small">Don't have an account? <a href="{{ url_for('auth.register') }}">Create one</a></p>
-            </form>
-        </div>
+<form method="POST" action="{{ url_for('auth.login') }}">
+  <div class="mb-3">
+    <label for="username" class="form-label">Username</label>
+    <div class="input-group">
+      <span class="input-group-text bg-white border-end-0" style="border-color:#dde1ea;border-radius:11px 0 0 11px;"><i class="bi bi-person text-muted"></i></span>
+      <input id="username" name="username" type="text" class="form-control border-start-0 ps-1" style="border-radius:0 11px 11px 0;" placeholder="Enter your username" required autocomplete="username" autofocus>
     </div>
-</div>
+  </div>
+  <div class="mb-4">
+    <label for="password" class="form-label">Password</label>
+    <div class="input-group">
+      <span class="input-group-text bg-white border-end-0" style="border-color:#dde1ea;border-radius:11px 0 0 11px;"><i class="bi bi-lock text-muted"></i></span>
+      <input id="password" name="password" type="password" class="form-control border-start-0 ps-1" style="border-radius:0 11px 11px 0;" placeholder="Enter your password" required autocomplete="current-password">
+    </div>
+  </div>
+  <div class="d-grid">
+    <button type="submit" class="btn btn-primary btn-lg">Sign in <i class="bi bi-arrow-right ms-1"></i></button>
+  </div>
+  <div class="text-center mt-4" style="font-size:.8rem;color:var(--hms-muted);">
+    New to HMS? <a href="{{ url_for('auth.register') }}" class="fw-semibold">Create an account</a>
+  </div>
+</form>
 {% endblock %}
