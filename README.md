@@ -5,8 +5,8 @@ Python 3.10+ (Python 3.13 is supported by the pinned requirements).
 ## Quick run — Windows PowerShell
 
 ```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m ensurepip --upgrade
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
@@ -74,3 +74,33 @@ This deletes/recreates `instance/hms.db`, seeds the accounts below, and publishe
 - Existing Phase 2 databases are upgraded automatically with additive `notification` and `audit_log` tables
 
 See `PHASE3_UPGRADE_NOTES.md` for the recommended Phase 3 demo flow.
+
+
+## Phase 4 security & reliability
+
+- Email verification for new accounts using signed, expiring verification links
+- Forgot/reset password with signed 30-minute reset tokens
+- Password-change flow that invalidates other active sessions
+- Global CSRF protection for all state-changing forms
+- Login throttling plus temporary account lockout after repeated failures
+- Blacklisted-account enforcement on the server
+- Stronger object-level authorization: doctors can only access patients they have an appointment relationship with
+- Secure session cookies, inactivity timeout, anti-framing/CSP/security headers
+- Branded 400/403/404/500 error pages
+- Prescription archival instead of destructive deletion
+- Automated security regression tests (`python -m pytest`)
+
+### Local verification/reset emails
+
+The default `HMS_MAIL_MODE=console` prints verification and password-reset links in the terminal for local development. For real email delivery use `HMS_MAIL_MODE=smtp` and configure the `HMS_SMTP_*` environment variables documented in `PHASE4_UPGRADE_NOTES.md`.
+
+### Production environment
+
+Before deployment, set a long random `HMS_SECRET_KEY`, serve the app only over HTTPS, and set `HMS_COOKIE_SECURE=1`.
+
+### Developer tests
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```

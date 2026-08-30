@@ -9,7 +9,7 @@
       <h3 class="card-title mb-2">Your Profile</h3>
       <p class="text-muted mb-4">Provide basic details for your doctor to view.</p>
 
-      <form method="POST" action="{{ url_for('patient.patient_profile') }}">
+      <form method="POST" action="{{ url_for('patient.patient_profile') }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="row g-3">
           <div class="col-md-6">
             <label class="form-label" for="name">Full name</label>

@@ -3,7 +3,7 @@
 {% block page_title %}New prescription{% endblock %}
 {% block content %}
 <div class="page-header"><div><h2 class="page-title">Create prescription</h2><p class="page-subtitle">Record the diagnosis, advice and follow-up first; medicines can be added on the next screen.</p></div></div>
-<form method="POST" action="{{ url_for('doctor.new_prescription') }}" class="hms-form-card">
+<form method="POST" action="{{ url_for('doctor.new_prescription') }}" class="hms-form-card"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
   <div class="mb-3">
     <label class="form-label" for="appointment_id">Consultation</label>
     <select id="appointment_id" name="appointment_id" class="form-select" required>

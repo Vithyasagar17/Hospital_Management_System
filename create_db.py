@@ -75,7 +75,7 @@ with app.app_context():
     db.session.commit()
 
     if not User.query.filter_by(username='admin').first():
-        admin = User(username='admin', role='Admin')
+        admin = User(username='admin', email='admin@medora.local', email_verified=True, role='Admin')
         admin.set_password('supersecretadmin')
         db.session.add(admin)
 
@@ -97,7 +97,7 @@ with app.app_context():
     db.session.commit()
 
     if not User.query.filter_by(username='dr_sample').first():
-        doctor_user = User(username='dr_sample', role='Doctor')
+        doctor_user = User(username='dr_sample', email='doctor@medora.local', email_verified=True, role='Doctor')
         doctor_user.set_password('doctorpass')
         db.session.add(doctor_user)
         db.session.commit()
@@ -127,7 +127,7 @@ with app.app_context():
         db.session.commit()
 
     if not User.query.filter_by(username='patient_sample').first():
-        patient_user = User(username='patient_sample', role='Patient')
+        patient_user = User(username='patient_sample', email='patient@medora.local', email_verified=True, role='Patient')
         patient_user.set_password('patientpass')
         db.session.add(patient_user)
         db.session.commit()

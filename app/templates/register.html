@@ -6,7 +6,13 @@
 <h2 class="hms-auth-title">Create your HMS account</h2>
 <p class="hms-auth-subtitle">Register as a doctor or patient. You can complete your profile after signing in.</p>
 
-<form method="POST" action="{{ url_for('auth.register') }}">
+<form method="POST" action="{{ url_for('auth.register') }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="mb-3">
+    <label class="form-label" for="email">Email address</label>
+    <input id="email" name="email" class="form-control" type="email" placeholder="you@example.com" required autocomplete="email">
+    <div class="form-text">A verification link will be sent before your first sign-in.</div>
+  </div>
+
   <div class="row g-3">
     <div class="col-md-6">
       <label class="form-label" for="username">Username</label>
@@ -14,7 +20,7 @@
     </div>
     <div class="col-md-6">
       <label class="form-label" for="password">Password</label>
-      <input id="password" name="password" class="form-control" type="password" placeholder="Create a password" required autocomplete="new-password">
+      <input id="password" name="password" class="form-control" type="password" placeholder="Create a strong password" minlength="8" required autocomplete="new-password"><div class="form-text">8+ characters with uppercase, lowercase and a number.</div>
     </div>
   </div>
 

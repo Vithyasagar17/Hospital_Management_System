@@ -199,7 +199,7 @@ def appointment_detail(appointment_id):
     appointment = Appointment.query.get_or_404(appointment_id)
     if appointment.patient_id != current_user.id:
         abort(403)
-    prescription = appointment.prescriptions[0] if appointment.prescriptions else None
+    prescription = appointment.active_prescription
     return render_template(
         'appointment_detail.html', appointment=appointment, prescription=prescription,
         viewer_role='Patient', now=datetime.now()
@@ -210,7 +210,7 @@ def appointment_detail(appointment_id):
 @login_required
 @role_required('Patient')
 def prescription_detail(prescription_id):
-    prescription = Prescription.query.get_or_404(prescription_id)
+    prescription = Prescription.query.filter_by(id=prescription_id, is_deleted=False).first_or_404()
     if prescription.appointment.patient_id != current_user.id:
         abort(403)
     return render_template('patient_prescription_detail.html', prescription=prescription)

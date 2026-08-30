@@ -5,6 +5,7 @@ from app import db
 from app.models import Doctor, Patient, Appointment, Specialization, User, AuditLog
 from app.routes.auth_decorator import role_required
 from app.activity import log_activity, notify_user
+from app.security import send_verification_email, validate_password
 from datetime import datetime, timedelta
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
@@ -108,15 +109,20 @@ def add_doctor():
 
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
-        password = request.form.get('password', '').strip()
+        email = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
         name = request.form.get('name', '').strip()
         specialization_id = request.form.get('specialization_id')
 
-        if not username or not password or not name:
-            flash('Username, password, and name are required.', 'warning')
+        password_ok, password_error = validate_password(password)
+        if not username or not email or not password or not name:
+            flash('Username, email, password, and name are required.', 'warning')
             return redirect(url_for('admin.add_doctor'))
-        if User.query.filter_by(username=username).first():
-            flash('Username already exists.', 'warning')
+        if not password_ok:
+            flash(password_error, 'warning')
+            return redirect(url_for('admin.add_doctor'))
+        if User.query.filter(or_(User.username == username, User.email == email)).first():
+            flash('Username or email already exists.', 'warning')
             return redirect(url_for('admin.add_doctor'))
 
         try:
@@ -124,7 +130,7 @@ def add_doctor():
         except ValueError:
             spec_id = None
 
-        user = User(username=username, role='Doctor')
+        user = User(username=username, email=email, email_verified=False, role='Doctor', session_version=1)
         user.set_password(password)
         db.session.add(user)
         db.session.flush()
@@ -133,8 +139,9 @@ def add_doctor():
         log_activity('doctor_created', f'Added doctor {name} ({username}).', 'Doctor', user.id)
         notify_user(user.id, 'Doctor account created', 'Your doctor workspace is ready. Complete your profile and availability.', 'success', '/doctor/dashboard')
         db.session.commit()
+        send_verification_email(user)
 
-        flash(f'Doctor {name} added successfully with username: {username}', 'success')
+        flash(f'Doctor {name} added. A verification link was sent to {email}.', 'success')
         return redirect(url_for('admin.admin_doctors'))
 
     return render_template('admin_add_doctor.html', specializations=specializations)

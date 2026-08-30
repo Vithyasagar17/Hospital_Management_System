@@ -6,7 +6,7 @@
 <div class="container mt-4">
   <h2>Edit Patient</h2>
 
-  <form method="POST" class="mt-4">
+  <form method="POST" class="mt-4"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <div class="form-group mb-3">
       <label for="name" class="form-label">Full Name</label>
       <input type="text" class="form-control" id="name" name="name" value="{{ patient.name or '' }}" required>

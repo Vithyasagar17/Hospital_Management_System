@@ -394,3 +394,8 @@ textarea.form-control { min-height: 110px; }
 @media(max-width:991.98px){.hms-doctor-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:767.98px){.hms-notification-card{align-items:flex-start;flex-wrap:wrap}.hms-notification-card>div:nth-child(2){min-width:calc(100% - 60px)}.hms-notification-card>div:last-child{width:100%;padding-left:56px;justify-content:flex-start!important}}
 @media(max-width:575.98px){.hms-doctor-grid{grid-template-columns:1fr}.hms-notification-menu{width:calc(100vw - 20px)}}
+
+
+/* Phase 4 — security and reliability surfaces */
+.hms-security-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:18px}.hms-security-grid>div{border:1px solid var(--hms-border);background:#fafbff;border-radius:12px;padding:14px}.hms-security-grid span{display:block;color:var(--hms-muted);font-size:.76rem;margin-bottom:5px}.hms-security-grid strong{font-size:.9rem}.hms-error-state{max-width:620px;margin:7vh auto;text-align:center;background:#fff;border:1px solid var(--hms-border);border-radius:20px;padding:48px 30px;box-shadow:var(--hms-shadow)}.hms-error-code{font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:4rem;line-height:1;color:var(--hms-primary);margin-bottom:18px}.hms-error-state p{color:var(--hms-muted);max-width:470px;margin:10px auto 24px}.hms-sidebar-footer form .hms-logout{background:transparent;text-align:left}.hms-sidebar-footer form .hms-logout:hover{background:rgba(255,255,255,.08)}
+@media(max-width:600px){.hms-security-grid{grid-template-columns:1fr}}
