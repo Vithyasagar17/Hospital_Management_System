@@ -48,7 +48,7 @@
     {% if viewer_role == 'Doctor' %}
     <section class="hms-panel mb-4">
       <div class="hms-panel-head"><div><div class="hms-kicker">Clinical note</div><h3>Doctor notes</h3></div><i class="bi bi-journal-text"></i></div>
-      <form method="POST" action="{{ url_for('doctor.update_appointment_notes', appointment_id=appointment.id) }}">
+      <form method="POST" action="{{ url_for('doctor.update_appointment_notes', appointment_id=appointment.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <textarea name="notes" class="form-control" rows="5" placeholder="Examination findings, observations, follow-up context...">{{ appointment.notes or '' }}</textarea>
         <button class="btn btn-outline-primary btn-sm mt-2" type="submit">Save notes</button>
       </form>
@@ -56,7 +56,7 @@
     {% if appointment.status in ['Pending','Confirmed'] %}
     <section class="hms-panel">
       <div class="hms-panel-head"><div><div class="hms-kicker">Workflow</div><h3>Update visit status</h3></div><i class="bi bi-arrow-repeat"></i></div>
-      <form action="{{ url_for('doctor.update_appointment_status', appointment_id=appointment.id) }}" method="POST" class="d-grid gap-2">
+      <form action="{{ url_for('doctor.update_appointment_status', appointment_id=appointment.id) }}" method="POST" class="d-grid gap-2"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="notes" value="{{ appointment.notes or '' }}">
         {% if appointment.status == 'Pending' %}<button name="status" value="Confirmed" class="btn btn-success"><i class="bi bi-check2 me-1"></i>Confirm appointment</button>{% endif %}
         {% if appointment.status == 'Confirmed' %}<button name="status" value="Completed" class="btn btn-primary"><i class="bi bi-check2-circle me-1"></i>Mark completed</button>{% endif %}
@@ -71,7 +71,7 @@
       {% elif appointment.status == 'Confirmed' %}<p class="text-muted small">Your appointment is confirmed. Please arrive on time.</p>
       {% elif appointment.status == 'Completed' %}<p class="text-muted small">This consultation is complete. Your prescription and notes are stored in your medical history.</p>
       {% else %}<p class="text-muted small">This appointment was cancelled.</p>{% endif %}
-      {% if appointment.status in ['Pending','Confirmed'] and appointment.date > now %}<form method="POST" action="{{ url_for('patient.cancel_appointment', appointment_id=appointment.id) }}"><button class="btn btn-outline-danger btn-sm" onclick="return confirm('Cancel this appointment?')">Cancel appointment</button></form>{% endif %}
+      {% if appointment.status in ['Pending','Confirmed'] and appointment.date > now %}<form method="POST" action="{{ url_for('patient.cancel_appointment', appointment_id=appointment.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger btn-sm" onclick="return confirm('Cancel this appointment?')">Cancel appointment</button></form>{% endif %}
     </section>
     {% endif %}
   </div>

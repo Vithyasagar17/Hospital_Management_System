@@ -10,7 +10,7 @@
         <div class="hms-profile-icon"><i class="bi bi-person-badge"></i></div>
         <div><h3 class="mb-1" style="font-size:1.05rem;">Professional details</h3><div class="text-muted" style="font-size:.76rem;">This name appears across the doctor portal.</div></div>
       </div>
-      <form method="post">
+      <form method="post"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="mb-3">
           <label for="name" class="form-label">Full name</label>
           <input type="text" class="form-control" id="name" name="name" value="{{ doctor.name if doctor else '' }}" required>

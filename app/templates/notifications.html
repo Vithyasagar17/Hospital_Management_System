@@ -4,7 +4,7 @@
 {% block content %}
 <div class="page-header">
   <div><span class="hms-kicker">Activity center</span><h2 class="page-title">Notifications</h2><p class="page-subtitle">Updates from appointments, prescriptions, and account activity.</p></div>
-  {% if unread_notification_count %}<form method="POST" action="{{ url_for('auth.mark_all_notifications_read') }}"><button class="btn btn-outline-primary"><i class="bi bi-check2-all me-1"></i> Mark all read</button></form>{% endif %}
+  {% if unread_notification_count %}<form method="POST" action="{{ url_for('auth.mark_all_notifications_read') }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-primary"><i class="bi bi-check2-all me-1"></i> Mark all read</button></form>{% endif %}
 </div>
 <div class="hms-filter-bar mb-4">
   {% for value,label in [('all','All'),('unread','Unread'),('read','Read')] %}<a href="{{ url_for('auth.notifications', state=value) }}" class="hms-filter-chip {% if state == value %}active{% endif %}">{{ label }}</a>{% endfor %}
@@ -14,10 +14,10 @@
 {% for n in notifications %}
   <div class="hms-notification-card {% if not n.is_read %}unread{% endif %}">
     <div class="hms-notification-icon {{ n.category }}"><i class="bi {% if n.category == 'success' %}bi-check-circle{% elif n.category == 'warning' %}bi-exclamation-triangle{% else %}bi-bell{% endif %}"></i></div>
-    <div class="flex-grow-1 min-w-0"><div class="d-flex gap-2 align-items-center flex-wrap"><h3>{{ n.title }}</h3>{% if not n.is_read %}<span class="hms-unread-dot"></span>{% endif %}</div><p>{{ n.message }}</p><small>{{ n.created_at.strftime('%d %b %Y · %I:%M %p') if n.created_at else '' }}</small></div>
+    <div class="flex-grow-1 min-w-0"><div class="d-flex gap-2 align-items-center flex-wrap"><h3>{{ n.title }}</h3>{% if not n.is_read %}<span class="hms-unread-dot"></span>{% endif %}</div><p>{{ n.message }}</p><small>{{ n.created_at|local_datetime('%d %b %Y · %I:%M %p') if n.created_at else '' }}</small></div>
     <div class="d-flex gap-2 flex-wrap justify-content-end">
       {% if n.target_url %}<a href="{{ url_for('auth.open_notification', notification_id=n.id) }}" class="btn btn-sm btn-primary">Open</a>{% endif %}
-      {% if not n.is_read %}<form method="POST" action="{{ url_for('auth.mark_notification_read', notification_id=n.id) }}"><button class="btn btn-sm btn-outline-secondary">Mark read</button></form>{% endif %}
+      {% if not n.is_read %}<form method="POST" action="{{ url_for('auth.mark_notification_read', notification_id=n.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-secondary">Mark read</button></form>{% endif %}
     </div>
   </div>
 {% endfor %}

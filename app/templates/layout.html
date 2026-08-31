@@ -78,12 +78,13 @@
         {% endif %}
         <div class="hms-nav-label mt-2">Activity</div>
         <a class="hms-nav-link {% if request.endpoint in ['auth.notifications','auth.open_notification'] %}active{% endif %}" href="{{ url_for('auth.notifications') }}"><i class="bi bi-bell"></i><span>Notifications</span>{% if unread_notification_count %}<span class="hms-nav-badge">{{ unread_notification_count if unread_notification_count < 100 else '99+' }}</span>{% endif %}</a>
+        <a class="hms-nav-link {% if request.endpoint in ['auth.security_settings','auth.change_password'] %}active{% endif %}" href="{{ url_for('auth.security_settings') }}"><i class="bi bi-shield-lock"></i><span>Account security</span></a>
         {% if role == 'Admin' %}<a class="hms-nav-link {% if request.endpoint == 'admin.audit_logs' %}active{% endif %}" href="{{ url_for('admin.audit_logs') }}"><i class="bi bi-shield-check"></i><span>Audit logs</span></a>{% endif %}
       </nav>
 
       <div class="hms-sidebar-footer">
         <div class="hms-security-note"><i class="bi bi-shield-check"></i><span>Secure hospital workspace</span></div>
-        <a class="hms-logout" href="{{ url_for('auth.logout') }}"><i class="bi bi-box-arrow-right"></i><span>Sign out</span></a>
+        <form method="POST" action="{{ url_for('auth.logout') }}" class="m-0"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button class="hms-logout border-0 w-100" type="submit"><i class="bi bi-box-arrow-right"></i><span>Sign out</span></button></form>
       </div>
     </aside>
 

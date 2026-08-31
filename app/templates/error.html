@@ -1,0 +1,7 @@
+{% extends 'layout.html' %}
+{% block title %}{{ error_code }}{% endblock %}
+{% block page_title %}Request error{% endblock %}
+{% block auth_content %}
+<div class="hms-error-state"><div class="hms-error-code">{{ error_code }}</div><h2>{{ error_title }}</h2><p>{{ error_message }}</p><a href="{{ url_for('auth.index') }}" class="btn btn-primary">Return to HMS</a></div>
+{% endblock %}
+{% block content %}<div class="hms-error-state"><div class="hms-error-code">{{ error_code }}</div><h2>{{ error_title }}</h2><p>{{ error_message }}</p><a href="{{ url_for('auth.index') }}" class="btn btn-primary">Return to dashboard</a></div>{% endblock %}

@@ -7,11 +7,11 @@ param(
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptDir
 
-$venvPath = Join-Path $scriptDir 'venv'
+$venvPath = Join-Path $scriptDir '.venv'
 $activate = Join-Path $venvPath 'Scripts\Activate.ps1'
 
 if (-not (Test-Path $activate)) {
-    python -m venv venv
+    python -m venv .venv
 }
 . $activate
 

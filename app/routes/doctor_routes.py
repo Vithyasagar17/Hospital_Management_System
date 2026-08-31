@@ -85,7 +85,7 @@ def doctor_profile():
 @role_required('Doctor')
 def doctor_patients():
     q = request.args.get('q', '').strip()
-    query = Patient.query
+    query = Patient.query.join(Appointment, Appointment.patient_id == Patient.id).filter(Appointment.doctor_id == current_user.id).distinct()
     if q:
         query = query.filter(or_(
             Patient.name.ilike(f'%{q}%'),
@@ -103,6 +103,9 @@ def doctor_view_patient(patient_id):
     patient = Patient.query.filter_by(id=patient_id).first()
     if not patient:
         abort(404)
+    has_relationship = Appointment.query.filter_by(doctor_id=current_user.id, patient_id=patient_id).first()
+    if not has_relationship:
+        abort(403)
     return render_template('doctor_patient_view.html', patient=patient)
 
 @doctor_bp.route('/appointments')
@@ -138,7 +141,7 @@ def appointment_detail(appointment_id):
     appointment = Appointment.query.get_or_404(appointment_id)
     if appointment.doctor_id != current_user.id:
         abort(403)
-    prescription = appointment.prescriptions[0] if appointment.prescriptions else None
+    prescription = appointment.active_prescription
     return render_template(
         'appointment_detail.html', appointment=appointment, prescription=prescription,
         viewer_role='Doctor', now=datetime.now()
@@ -152,7 +155,7 @@ def prescriptions():
     q = request.args.get('q', '').strip()
     date_from_raw = request.args.get('date_from', '')
     date_to_raw = request.args.get('date_to', '')
-    query = Prescription.query.join(Appointment).join(Patient, Appointment.patient_id == Patient.id).filter(Appointment.doctor_id == current_user.id)
+    query = Prescription.query.join(Appointment).join(Patient, Appointment.patient_id == Patient.id).filter(Appointment.doctor_id == current_user.id, Prescription.is_deleted.is_(False))
     if q:
         query = query.filter(or_(Patient.name.ilike(f'%{q}%'), Prescription.diagnosis.ilike(f'%{q}%')))
     try:
@@ -188,9 +191,9 @@ def new_prescription():
         if appt.status not in ['Confirmed', 'Completed']:
             flash('A prescription can only be created for a confirmed or completed consultation.', 'warning')
             return redirect(url_for('doctor.appointment_detail', appointment_id=appt.id))
-        if appt.prescriptions:
+        if appt.active_prescription:
             flash('This appointment already has a prescription.', 'info')
-            return redirect(url_for('doctor.prescription_detail', prescription_id=appt.prescriptions[0].id))
+            return redirect(url_for('doctor.prescription_detail', prescription_id=appt.active_prescription.id))
 
         diagnosis = request.form.get('diagnosis', '').strip()
         advice = request.form.get('advice', '').strip()
@@ -232,7 +235,7 @@ def new_prescription():
 @login_required
 @role_required('Doctor')
 def prescription_detail(prescription_id):
-    prescription = Prescription.query.get_or_404(prescription_id)
+    prescription = Prescription.query.filter_by(id=prescription_id, is_deleted=False).first_or_404()
     if prescription.appointment.doctor_id != current_user.id:
         abort(403)
 
@@ -267,7 +270,7 @@ def prescription_detail(prescription_id):
 @login_required
 @role_required('Doctor')
 def edit_prescription(prescription_id):
-    prescription = Prescription.query.get_or_404(prescription_id)
+    prescription = Prescription.query.filter_by(id=prescription_id, is_deleted=False).first_or_404()
     if prescription.appointment.doctor_id != current_user.id:
         abort(403)
 
@@ -301,7 +304,7 @@ def edit_prescription(prescription_id):
 @role_required('Doctor')
 def delete_medicine(item_id):
     item = PrescriptionItem.query.get_or_404(item_id)
-    if item.prescription.appointment.doctor_id != current_user.id:
+    if item.prescription.is_deleted or item.prescription.appointment.doctor_id != current_user.id:
         abort(403)
 
     prescription_id = item.prescription_id
@@ -317,14 +320,17 @@ def delete_medicine(item_id):
 @login_required
 @role_required('Doctor')
 def delete_prescription(prescription_id):
-    prescription = Prescription.query.get_or_404(prescription_id)
+    prescription = Prescription.query.filter_by(id=prescription_id, is_deleted=False).first_or_404()
     if prescription.appointment.doctor_id != current_user.id:
         abort(403)
 
     appointment_id = prescription.appointment_id
-    db.session.delete(prescription)
-    log_activity('prescription_deleted', f'Deleted prescription #{prescription_id} for appointment #{appointment_id}.', 'Appointment', appointment_id)
+    prescription.is_deleted = True
+    prescription.deleted_at = datetime.utcnow()
+    prescription.deleted_by = current_user.id
+    log_activity('prescription_archived', f'Archived prescription #{prescription_id} for appointment #{appointment_id}.', 'Appointment', appointment_id)
     db.session.commit()
+    flash('Prescription archived. The clinical audit trail was preserved.', 'success')
     return redirect(url_for('doctor.prescriptions'))
 
 @doctor_bp.route('/appointment/<int:appointment_id>/update', methods=['POST'])
@@ -486,6 +492,8 @@ def view_patient_history(patient_id):
     patient = Patient.query.filter_by(id=patient_id).first()
     if not patient:
         abort(404)
+    if not Appointment.query.filter_by(doctor_id=current_user.id, patient_id=patient_id).first():
+        abort(403)
 
     # Get all completed appointments for this patient with the current doctor
     appointments = Appointment.query.filter(
