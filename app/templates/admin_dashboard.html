@@ -26,7 +26,7 @@
     <div class="hms-panel h-100">
       <div class="hms-panel-head"><div><span class="hms-kicker">Workflow</span><h3>Status snapshot</h3></div><i class="bi bi-pie-chart"></i></div>
       <div class="hms-status-stack">
-        {% for label, value, cls in [('Pending', status_counts.Pending, 'warning'), ('Confirmed', status_counts.Confirmed, 'success'), ('Completed', status_counts.Completed, 'primary'), ('Cancelled', status_counts.Cancelled, 'danger')] %}
+        {% for label, value, cls in [('Pending', status_counts.Pending, 'warning'), ('Confirmed', status_counts.Confirmed, 'success'), ('Completed', status_counts.Completed, 'primary'), ('Cancelled', status_counts.Cancelled, 'danger'), ('No Show', status_counts['No Show'], 'secondary')] %}
         <div class="hms-status-row"><span><i class="hms-status-dot {{ cls }}"></i>{{ label }}</span><strong>{{ value }}</strong></div>
         {% endfor %}
       </div>
@@ -45,7 +45,7 @@
         <div class="hms-activity-item">
           <span class="hms-activity-icon"><i class="bi bi-calendar2-event"></i></span>
           <div class="flex-grow-1"><strong>{{ a.patient.name if a.patient else 'Patient' }} → Dr. {{ a.doctor.name if a.doctor else 'Doctor' }}</strong><small>{{ a.date.strftime('%d %b %Y · %I:%M %p') if a.date else 'Date unavailable' }} · {{ a.reason|truncate(58) }}</small></div>
-          <span class="badge {% if a.status == 'Pending' %}bg-warning{% elif a.status == 'Confirmed' %}bg-success{% elif a.status == 'Cancelled' %}bg-danger{% else %}bg-primary{% endif %}">{{ a.status }}</span>
+          <span class="badge {% if a.status == 'Pending' %}bg-warning{% elif a.status == 'Confirmed' %}bg-success{% elif a.status == 'Cancelled' %}bg-danger{% elif a.status == 'No Show' %}bg-secondary{% else %}bg-primary{% endif %}">{{ a.status }}</span>
         </div>
         {% endfor %}
       </div>

@@ -8,7 +8,7 @@
     <h2 class="page-title">{{ appointment.date.strftime('%d %B %Y') }} · {{ appointment.date.strftime('%I:%M %p') }}</h2>
     <p class="page-subtitle">A complete view of the consultation, status, clinical notes and prescription.</p>
   </div>
-  <span class="badge fs-6 {% if appointment.status == 'Pending' %}bg-warning{% elif appointment.status == 'Confirmed' %}bg-success{% elif appointment.status == 'Cancelled' %}bg-danger{% else %}bg-primary{% endif %}">{{ appointment.status }}</span>
+  <span class="badge fs-6 {% if appointment.status == 'Pending' %}bg-warning{% elif appointment.status == 'Confirmed' %}bg-success{% elif appointment.status == 'Cancelled' %}bg-danger{% elif appointment.status == 'No Show' %}bg-secondary{% else %}bg-primary{% endif %}">{{ appointment.status }}</span>
 </div>
 
 <div class="row g-4">
@@ -21,6 +21,7 @@
         <div><span>Date & time</span><strong>{{ appointment.date.strftime('%d %b %Y · %I:%M %p') }}</strong></div>
         <div><span>Status</span><strong>{{ appointment.status }}</strong></div>
       </div>
+      {% if appointment.reschedule_count %}<div class="alert alert-info mt-3 mb-0"><i class="bi bi-calendar2-event me-1"></i>Rescheduled {{ appointment.reschedule_count }} time{{ '' if appointment.reschedule_count == 1 else 's' }}. The latest change returned this visit to the confirmation queue.</div>{% endif %}
       <div class="hms-clinical-block mt-4"><span>Reason / symptoms</span><p>{{ appointment.reason }}</p></div>
       <div class="hms-clinical-block"><span>Consultation notes</span><p>{{ appointment.notes or 'No consultation notes recorded yet.' }}</p></div>
     </section>
@@ -59,7 +60,7 @@
       <form action="{{ url_for('doctor.update_appointment_status', appointment_id=appointment.id) }}" method="POST" class="d-grid gap-2"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="notes" value="{{ appointment.notes or '' }}">
         {% if appointment.status == 'Pending' %}<button name="status" value="Confirmed" class="btn btn-success"><i class="bi bi-check2 me-1"></i>Confirm appointment</button>{% endif %}
-        {% if appointment.status == 'Confirmed' %}<button name="status" value="Completed" class="btn btn-primary"><i class="bi bi-check2-circle me-1"></i>Mark completed</button>{% endif %}
+        {% if appointment.status == 'Confirmed' %}<button name="status" value="Completed" class="btn btn-primary"><i class="bi bi-check2-circle me-1"></i>Mark completed</button>{% if appointment.date <= now %}<button name="status" value="No Show" class="btn btn-outline-secondary" onclick="return confirm('Mark this patient as a no-show?')"><i class="bi bi-person-x me-1"></i>Mark no show</button>{% endif %}{% endif %}
         <button name="status" value="Cancelled" class="btn btn-outline-danger" onclick="return confirm('Cancel this appointment?')">Cancel appointment</button>
       </form>
     </section>
@@ -70,8 +71,9 @@
       {% if appointment.status == 'Pending' %}<p class="text-muted small">Your request is waiting for the doctor to confirm it.</p>
       {% elif appointment.status == 'Confirmed' %}<p class="text-muted small">Your appointment is confirmed. Please arrive on time.</p>
       {% elif appointment.status == 'Completed' %}<p class="text-muted small">This consultation is complete. Your prescription and notes are stored in your medical history.</p>
+      {% elif appointment.status == 'No Show' %}<p class="text-muted small">This visit was marked as a no-show. Book or reschedule a future appointment if you still need care.</p>
       {% else %}<p class="text-muted small">This appointment was cancelled.</p>{% endif %}
-      {% if appointment.status in ['Pending','Confirmed'] and appointment.date > now %}<form method="POST" action="{{ url_for('patient.cancel_appointment', appointment_id=appointment.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger btn-sm" onclick="return confirm('Cancel this appointment?')">Cancel appointment</button></form>{% endif %}
+      {% if appointment.status in ['Pending','Confirmed'] and appointment.date > now %}<div class="d-flex gap-2 flex-wrap"><a href="{{ url_for('patient.reschedule_appointment', appointment_id=appointment.id) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-calendar2-event me-1"></i>Reschedule</a><form method="POST" action="{{ url_for('patient.cancel_appointment', appointment_id=appointment.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger btn-sm" onclick="return confirm('Cancel this appointment?')">Cancel appointment</button></form></div>{% endif %}
     </section>
     {% endif %}
   </div>

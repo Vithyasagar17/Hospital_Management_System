@@ -167,8 +167,8 @@ def create_app(test_config=None):
     # ---------------------------------------------------------
 
     with app.app_context():
-        from app.schema_upgrade import ensure_phase4_schema
-        ensure_phase4_schema()
+        from app.schema_upgrade import ensure_phase5_schema
+        ensure_phase5_schema()
 
     # ---------------------------------------------------------
     # CSRF SECURITY

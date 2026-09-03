@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, time
 from app.models import Appointment, DoctorAvailability
 
 SLOT_MINUTES = 30
+ACTIVE_APPOINTMENT_STATUSES = ('Pending', 'Confirmed')
 
 
 def _parse_time(value):
@@ -25,11 +26,37 @@ def _slot_times(start_time, end_time):
     return slots
 
 
-def available_slots_for_doctor(doctor_id, start_date=None, days=8):
+def _active_appointment_query():
+    return Appointment.query.filter(Appointment.status.in_(ACTIVE_APPOINTMENT_STATUSES))
+
+
+def has_active_doctor_conflict(doctor_id, appointment_dt, exclude_appointment_id=None):
+    query = _active_appointment_query().filter(
+        Appointment.doctor_id == doctor_id,
+        Appointment.date == appointment_dt,
+    )
+    if exclude_appointment_id is not None:
+        query = query.filter(Appointment.id != exclude_appointment_id)
+    return query.first() is not None
+
+
+def has_active_patient_conflict(patient_id, appointment_dt, exclude_appointment_id=None):
+    """Prevent one patient from holding two active visits at the same time."""
+    query = _active_appointment_query().filter(
+        Appointment.patient_id == patient_id,
+        Appointment.date == appointment_dt,
+    )
+    if exclude_appointment_id is not None:
+        query = query.filter(Appointment.id != exclude_appointment_id)
+    return query.first() is not None
+
+
+def available_slots_for_doctor(doctor_id, start_date=None, days=8, exclude_appointment_id=None):
     """Build free booking slots from the doctor's availability windows.
 
     Available windows create slots. Unavailable windows remove overlapping slots.
-    Existing non-cancelled appointments remove their slot as well.
+    Existing active appointments remove their slot as well. When rescheduling, the
+    appointment being moved can be excluded so its current slot remains selectable.
     """
     start_date = start_date or datetime.now().date()
     end_date = start_date + timedelta(days=days - 1)
@@ -44,8 +71,11 @@ def available_slots_for_doctor(doctor_id, start_date=None, days=8):
         Appointment.doctor_id == doctor_id,
         Appointment.date >= datetime.combine(start_date, time.min),
         Appointment.date < datetime.combine(end_date + timedelta(days=1), time.min),
-        Appointment.status != 'Cancelled',
-    ).all()
+        Appointment.status.in_(ACTIVE_APPOINTMENT_STATUSES),
+    )
+    if exclude_appointment_id is not None:
+        appointments = appointments.filter(Appointment.id != exclude_appointment_id)
+    appointments = appointments.all()
 
     booked = {}
     for appointment in appointments:
@@ -93,6 +123,11 @@ def available_slots_for_doctor(doctor_id, start_date=None, days=8):
     return result
 
 
-def is_valid_booking_slot(doctor_id, appointment_dt):
-    slots = available_slots_for_doctor(doctor_id, start_date=appointment_dt.date(), days=1)
+def is_valid_booking_slot(doctor_id, appointment_dt, exclude_appointment_id=None):
+    slots = available_slots_for_doctor(
+        doctor_id,
+        start_date=appointment_dt.date(),
+        days=1,
+        exclude_appointment_id=exclude_appointment_id,
+    )
     return appointment_dt.strftime('%H:%M') in slots.get(appointment_dt.date().isoformat(), [])
