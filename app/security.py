@@ -94,7 +94,7 @@ def read_token(token: str, purpose: str, max_age: int):
     return payload
 
 
-def send_security_email(recipient: str, subject: str, body: str) -> bool:
+def send_app_email(recipient: str, subject: str, body: str) -> bool:
     """Send via SMTP or print to console in local demo mode.
 
     HMS_MAIL_MODE=console is intentionally a development-only mode. In a
@@ -102,8 +102,8 @@ def send_security_email(recipient: str, subject: str, body: str) -> bool:
     """
     mode = current_app.config.get('MAIL_MODE', 'console')
     if mode == 'console':
-        logger.warning('DEV SECURITY EMAIL to %s | %s\n%s', recipient, subject, body)
-        print(f'\n--- HMS SECURITY EMAIL (development console) ---\nTo: {recipient}\nSubject: {subject}\n{body}\n--- END SECURITY EMAIL ---\n')
+        logger.warning('DEV HMS EMAIL to %s | %s\n%s', recipient, subject, body)
+        print(f'\n--- HMS EMAIL (development console) ---\nTo: {recipient}\nSubject: {subject}\n{body}\n--- END HMS EMAIL ---\n')
         return True
     if mode != 'smtp':
         logger.error('Unknown MAIL_MODE=%s', mode)
@@ -141,8 +141,13 @@ def send_security_email(recipient: str, subject: str, body: str) -> bool:
                 smtp.send_message(msg)
         return True
     except Exception:
-        logger.exception('Could not send HMS security email.')
+        logger.exception('Could not send HMS email.')
         return False
+
+
+def send_security_email(recipient: str, subject: str, body: str) -> bool:
+    """Backward-compatible name used by Phase 4 security flows."""
+    return send_app_email(recipient, subject, body)
 
 
 def send_verification_email(user) -> bool:

@@ -91,4 +91,10 @@ def ensure_phase5_schema():
         'last_rescheduled_at': 'DATETIME',
         'no_show_at': 'DATETIME',
     })
+
+    # Phase 5B uses a separate delivery ledger instead of reminder flags on
+    # Appointment. This preserves history across reschedules and gives us a
+    # database-level idempotency/concurrency guard.
+    from app.models import AppointmentReminder
+    AppointmentReminder.__table__.create(bind=db.engine, checkfirst=True)
     db.session.commit()

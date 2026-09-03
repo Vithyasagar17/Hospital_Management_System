@@ -24,3 +24,29 @@ This slice establishes the scheduling rules that reminders and waitlists will bu
 - Automated appointment reminders.
 - Waitlist and released-slot notifications.
 - No-show analytics and reminder effectiveness metrics.
+
+## Phase 5B — Appointment reminders
+- Added idempotent 24-hour and 2-hour reminder processing for confirmed appointments.
+- Reminder windows are mutually exclusive so a late first run does not stack both reminders at once.
+- Added `appointment_reminder` delivery ledger with a unique key across appointment, recipient, reminder type, and schedule snapshot.
+- Rescheduled appointments can receive fresh reminders for the new schedule without deleting historical deliveries.
+- Patient reminders are enabled by default; doctor reminders are optional from the CLI.
+- In-app notifications are the default delivery channel.
+- Optional email delivery reuses the existing console/SMTP mail transport; console mode remains simulated.
+- Appointment detail shows which reminders have been sent for the current schedule.
+- Added a manual CLI command suitable for local testing and future scheduler/worker integration.
+
+### Run reminders manually
+```powershell
+python -m flask --app run send-appointment-reminders
+```
+
+Include doctors as recipients:
+```powershell
+python -m flask --app run send-appointment-reminders --include-doctors
+```
+
+Also attempt email delivery (console mode prints the email; SMTP mode sends it):
+```powershell
+python -m flask --app run send-appointment-reminders --email
+```

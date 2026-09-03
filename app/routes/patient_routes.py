@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import login_required, current_user
 from app.routes.auth_decorator import role_required
-from app.models import Patient, Doctor, Appointment, Specialization, DoctorAvailability, Prescription
+from app.models import Patient, Doctor, Appointment, Specialization, DoctorAvailability, Prescription, AppointmentReminder
 from app import db
 from sqlalchemy import or_
 from app.activity import log_activity, notify_user
@@ -204,9 +204,14 @@ def appointment_detail(appointment_id):
     if appointment.patient_id != current_user.id:
         abort(403)
     prescription = appointment.active_prescription
+    current_reminders = AppointmentReminder.query.filter_by(
+        appointment_id=appointment.id,
+        user_id=current_user.id,
+        scheduled_for=appointment.date,
+    ).order_by(AppointmentReminder.sent_at.asc()).all()
     return render_template(
         'appointment_detail.html', appointment=appointment, prescription=prescription,
-        viewer_role='Patient', now=datetime.now()
+        viewer_role='Patient', now=datetime.now(), current_reminders=current_reminders
     )
 
 

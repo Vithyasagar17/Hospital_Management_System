@@ -126,6 +126,30 @@ class Notification(db.Model):
     user = db.relationship('User', backref=db.backref('notifications', lazy=True, cascade='all, delete-orphan'))
 
 
+class AppointmentReminder(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    appointment_id = db.Column(db.Integer, db.ForeignKey('appointment.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    reminder_type = db.Column(db.String(20), nullable=False)
+    # Snapshot of the schedule this reminder belongs to. This is essential
+    # for rescheduling: a new schedule may legitimately receive the same
+    # reminder type again without deleting the old delivery history.
+    scheduled_for = db.Column(db.DateTime, nullable=False)
+    sent_at = db.Column(db.DateTime, nullable=False)
+    email_attempted_at = db.Column(db.DateTime, nullable=True)
+    email_sent = db.Column(db.Boolean, default=False, nullable=False)
+
+    appointment = db.relationship('Appointment', backref=db.backref('reminders', lazy=True, cascade='all, delete-orphan'))
+    user = db.relationship('User', backref=db.backref('appointment_reminders', lazy=True, cascade='all, delete-orphan'))
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            'appointment_id', 'user_id', 'reminder_type', 'scheduled_for',
+            name='uq_appointment_reminder_delivery',
+        ),
+    )
+
+
 class AuditLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True, index=True)
