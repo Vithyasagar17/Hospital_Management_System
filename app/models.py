@@ -3,6 +3,7 @@ from datetime import datetime
 from app import db
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy import text
 
 
 class User(UserMixin, db.Model):
@@ -146,6 +147,34 @@ class AppointmentReminder(db.Model):
         db.UniqueConstraint(
             'appointment_id', 'user_id', 'reminder_type', 'scheduled_for',
             name='uq_appointment_reminder_delivery',
+        ),
+    )
+
+
+class WaitlistEntry(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    patient_id = db.Column(db.Integer, db.ForeignKey('patient.id'), nullable=False, index=True)
+    doctor_id = db.Column(db.Integer, db.ForeignKey('doctor.id'), nullable=False, index=True)
+    target_date = db.Column(db.Date, nullable=False, index=True)
+    reason = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), default='Waiting', nullable=False, index=True)
+    offered_slot = db.Column(db.DateTime, nullable=True)
+    offered_at = db.Column(db.DateTime, nullable=True)
+    offer_expires_at = db.Column(db.DateTime, nullable=True, index=True)
+    booked_appointment_id = db.Column(db.Integer, db.ForeignKey('appointment.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+    patient = db.relationship('Patient', foreign_keys=[patient_id], backref=db.backref('waitlist_entries', lazy=True))
+    doctor = db.relationship('Doctor', foreign_keys=[doctor_id], backref=db.backref('waitlist_entries', lazy=True))
+    booked_appointment = db.relationship('Appointment', foreign_keys=[booked_appointment_id])
+
+    __table_args__ = (
+        db.Index(
+            'ix_waitlist_active_unique',
+            'patient_id', 'doctor_id', 'target_date',
+            unique=True,
+            sqlite_where=text("status IN ('Waiting', 'Offered')"),
         ),
     )
 

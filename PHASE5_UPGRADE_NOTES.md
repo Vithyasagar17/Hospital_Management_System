@@ -50,3 +50,22 @@ Also attempt email delivery (console mode prints the email; SMTP mode sends it):
 ```powershell
 python -m flask --app run send-appointment-reminders --email
 ```
+
+## Phase 5C — Waitlist and released-slot promotion
+- Patients can join a doctor's waitlist for a published date only when all bookable slots are occupied.
+- Active duplicate waitlist entries are prevented at both application and SQLite index levels.
+- Patient and doctor workspaces now include dedicated waitlist views.
+- Cancelling or rescheduling an appointment immediately offers the released slot to the oldest eligible waiting patient.
+- Doctor-side cancellation also triggers the same released-slot workflow.
+- Offers last 15 minutes and create in-app notifications with a direct claim link.
+- Offered slots are temporarily reserved and disappear from normal booking choices during the claim window.
+- Patients explicitly claim offers; successful claims create a new `Pending` appointment for doctor confirmation.
+- Declined/expired offers can promote the same slot to the next waiting patient.
+- Waitlist history records Waiting, Offered, Booked, Cancelled, and Expired states.
+- Added CLI maintenance for expired offers:
+
+```powershell
+python -m flask --app run process-waitlist-offers
+```
+
+- Added Phase 5C regression tests for fully-booked dates, released-slot offers, temporary holds, claiming, duplicate prevention, and expiry promotion.

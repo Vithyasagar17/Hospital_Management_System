@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, time
 
-from app.models import Appointment, DoctorAvailability
+from app.models import Appointment, DoctorAvailability, WaitlistEntry
 
 SLOT_MINUTES = 30
 ACTIVE_APPOINTMENT_STATUSES = ('Pending', 'Confirmed')
@@ -51,7 +51,7 @@ def has_active_patient_conflict(patient_id, appointment_dt, exclude_appointment_
     return query.first() is not None
 
 
-def available_slots_for_doctor(doctor_id, start_date=None, days=8, exclude_appointment_id=None):
+def available_slots_for_doctor(doctor_id, start_date=None, days=8, exclude_appointment_id=None, exclude_waitlist_entry_id=None):
     """Build free booking slots from the doctor's availability windows.
 
     Available windows create slots. Unavailable windows remove overlapping slots.
@@ -77,11 +77,26 @@ def available_slots_for_doctor(doctor_id, start_date=None, days=8, exclude_appoi
         appointments = appointments.filter(Appointment.id != exclude_appointment_id)
     appointments = appointments.all()
 
+    holds = WaitlistEntry.query.filter(
+        WaitlistEntry.doctor_id == doctor_id,
+        WaitlistEntry.status == 'Offered',
+        WaitlistEntry.offered_slot >= datetime.combine(start_date, time.min),
+        WaitlistEntry.offered_slot < datetime.combine(end_date + timedelta(days=1), time.min),
+        WaitlistEntry.offer_expires_at > datetime.utcnow(),
+    )
+    if exclude_waitlist_entry_id is not None:
+        holds = holds.filter(WaitlistEntry.id != exclude_waitlist_entry_id)
+    holds = holds.all()
+
     booked = {}
     for appointment in appointments:
         if appointment.date:
             key = appointment.date.date().isoformat()
             booked.setdefault(key, set()).add(appointment.date.strftime('%H:%M'))
+    for hold in holds:
+        if hold.offered_slot:
+            key = hold.offered_slot.date().isoformat()
+            booked.setdefault(key, set()).add(hold.offered_slot.strftime('%H:%M'))
 
     by_date = {}
     for window in windows:
@@ -123,11 +138,12 @@ def available_slots_for_doctor(doctor_id, start_date=None, days=8, exclude_appoi
     return result
 
 
-def is_valid_booking_slot(doctor_id, appointment_dt, exclude_appointment_id=None):
+def is_valid_booking_slot(doctor_id, appointment_dt, exclude_appointment_id=None, exclude_waitlist_entry_id=None):
     slots = available_slots_for_doctor(
         doctor_id,
         start_date=appointment_dt.date(),
         days=1,
         exclude_appointment_id=exclude_appointment_id,
+        exclude_waitlist_entry_id=exclude_waitlist_entry_id,
     )
     return appointment_dt.strftime('%H:%M') in slots.get(appointment_dt.date().isoformat(), [])

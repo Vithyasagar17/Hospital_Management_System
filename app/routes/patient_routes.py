@@ -1,9 +1,10 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import login_required, current_user
 from app.routes.auth_decorator import role_required
-from app.models import Patient, Doctor, Appointment, Specialization, DoctorAvailability, Prescription, AppointmentReminder
+from app.models import Patient, Doctor, Appointment, Specialization, DoctorAvailability, Prescription, AppointmentReminder, WaitlistEntry
 from app import db
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from app.activity import log_activity, notify_user
 from datetime import datetime, timedelta
 from app.scheduling import (
@@ -11,6 +12,12 @@ from app.scheduling import (
     is_valid_booking_slot,
     has_active_doctor_conflict,
     has_active_patient_conflict,
+)
+from app.waitlist import (
+    active_waitlist_entry,
+    claim_waitlist_offer,
+    is_waitlistable_day,
+    offer_released_slot,
 )
 
 patient_bp = Blueprint('patient', __name__, url_prefix='/patient')
@@ -241,6 +248,7 @@ def search_doctors():
 
     doctors = query.order_by(Doctor.name).all()
     available_slots = {}
+    waitlistable = {}
     available_on = None
     if available_on_raw:
         try:
@@ -251,17 +259,21 @@ def search_doctors():
     if available_on:
         filtered = []
         for doctor in doctors:
-            slot_map = available_slots_for_doctor(doctor.id, days=15)
+            slot_map = available_slots_for_doctor(doctor.id, start_date=available_on, days=1)
             day_slots = slot_map.get(available_on.isoformat(), [])
-            if day_slots:
+            can_waitlist = is_waitlistable_day(doctor.id, available_on)
+            if day_slots or can_waitlist:
                 filtered.append(doctor)
                 available_slots[str(doctor.id)] = day_slots
+                waitlistable[str(doctor.id)] = can_waitlist
         doctors = filtered
 
     specializations = Specialization.query.order_by(Specialization.name).all()
     return render_template('patient_search_doctors.html', doctors=doctors, query=q,
                            specialization_id=specialization_id, specializations=specializations,
-                           available_on=available_on_raw, available_slots=available_slots)
+                           available_on=available_on_raw, available_slots=available_slots,
+                           waitlistable=waitlistable)
+
 
 
 @patient_bp.route('/doctor/<int:doctor_id>/profile')
@@ -353,6 +365,7 @@ def reschedule_appointment(appointment_id):
             'warning',
             f'/doctor/appointment/{appointment.id}',
         )
+        offer_released_slot(appointment.doctor_id, old_date)
         db.session.commit()
 
         flash(f'Appointment rescheduled with Dr. {doctor_name}. The new slot is awaiting confirmation.', 'success')
@@ -364,6 +377,126 @@ def reschedule_appointment(appointment_id):
         doctor=doctor,
         slot_map=slot_map,
     )
+
+
+@patient_bp.route('/waitlist')
+@login_required
+@role_required('Patient')
+def waitlist():
+    entries = WaitlistEntry.query.filter_by(patient_id=current_user.id)\
+        .order_by(WaitlistEntry.created_at.desc(), WaitlistEntry.id.desc()).all()
+    return render_template('waitlist.html', entries=entries, now_utc=datetime.utcnow())
+
+
+@patient_bp.route('/waitlist/join', methods=['GET', 'POST'])
+@login_required
+@role_required('Patient')
+def join_waitlist():
+    patient = db.session.get(Patient, current_user.id)
+    doctor_id = request.form.get('doctor_id', type=int) if request.method == 'POST' else request.args.get('doctor_id', type=int)
+    date_raw = ((request.form.get('target_date') if request.method == 'POST' else request.args.get('date', '')) or '').strip()
+    doctor = Doctor.query.filter_by(id=doctor_id, is_blacklisted=False).first() if doctor_id else None
+
+    try:
+        target_date = datetime.strptime(date_raw, '%Y-%m-%d').date() if date_raw else None
+    except ValueError:
+        target_date = None
+
+    if not patient:
+        flash('Complete your patient profile before joining a waitlist.', 'warning')
+        return redirect(url_for('patient.patient_profile'))
+    if not doctor or not target_date:
+        flash('Choose a valid doctor and waitlist date.', 'warning')
+        return redirect(url_for('patient.search_doctors'))
+    if target_date < datetime.now().date():
+        flash('You cannot join a waitlist for a past date.', 'warning')
+        return redirect(url_for('patient.search_doctors'))
+    if not is_waitlistable_day(doctor.id, target_date):
+        flash('That date is not currently fully booked. Choose one of the available slots instead.', 'info')
+        return redirect(url_for('patient.book_appointment', doctor_id=doctor.id))
+
+    existing = active_waitlist_entry(current_user.id, doctor.id, target_date)
+    if existing:
+        flash('You are already waiting for this doctor on that date.', 'info')
+        return redirect(url_for('patient.waitlist_entry', entry_id=existing.id))
+
+    if request.method == 'POST':
+        reason = request.form.get('reason', '').strip()
+        if not reason:
+            flash('Please provide the reason for your visit.', 'warning')
+            return redirect(url_for('patient.join_waitlist', doctor_id=doctor.id, date=target_date.isoformat()))
+        entry = WaitlistEntry(
+            patient_id=patient.id, doctor_id=doctor.id, target_date=target_date,
+            reason=reason, status='Waiting',
+        )
+        db.session.add(entry)
+        db.session.flush()
+        log_activity('waitlist_joined',
+                     f'Joined Dr. {doctor.name or "Doctor"} waitlist for {target_date.strftime("%d %b %Y")}.',
+                     'WaitlistEntry', entry.id)
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash('You are already waiting for this doctor on that date.', 'info')
+            existing = active_waitlist_entry(current_user.id, doctor.id, target_date)
+            if existing:
+                return redirect(url_for('patient.waitlist_entry', entry_id=existing.id))
+            return redirect(url_for('patient.waitlist'))
+        flash('You joined the waitlist. We will notify you if a slot opens.', 'success')
+        return redirect(url_for('patient.waitlist_entry', entry_id=entry.id))
+
+    return render_template('join_waitlist.html', doctor=doctor, target_date=target_date)
+
+
+@patient_bp.route('/waitlist/<int:entry_id>')
+@login_required
+@role_required('Patient')
+def waitlist_entry(entry_id):
+    entry = WaitlistEntry.query.get_or_404(entry_id)
+    if entry.patient_id != current_user.id:
+        abort(403)
+    return render_template('waitlist_detail.html', entry=entry, now_utc=datetime.utcnow())
+
+
+@patient_bp.route('/waitlist/<int:entry_id>/claim', methods=['POST'])
+@login_required
+@role_required('Patient')
+def claim_waitlist(entry_id):
+    entry = WaitlistEntry.query.get_or_404(entry_id)
+    if entry.patient_id != current_user.id:
+        abort(403)
+    appointment, error = claim_waitlist_offer(entry)
+    if error:
+        db.session.commit()
+        flash(error, 'warning')
+        return redirect(url_for('patient.waitlist_entry', entry_id=entry.id))
+    db.session.commit()
+    flash('Released slot claimed. Your appointment is now awaiting doctor confirmation.', 'success')
+    return redirect(url_for('patient.appointment_detail', appointment_id=appointment.id))
+
+
+@patient_bp.route('/waitlist/<int:entry_id>/cancel', methods=['POST'])
+@login_required
+@role_required('Patient')
+def cancel_waitlist(entry_id):
+    entry = WaitlistEntry.query.get_or_404(entry_id)
+    if entry.patient_id != current_user.id:
+        abort(403)
+    if entry.status not in ['Waiting', 'Offered']:
+        flash('This waitlist entry is already closed.', 'info')
+        return redirect(url_for('patient.waitlist_entry', entry_id=entry.id))
+
+    released_offer = entry.offered_slot if entry.status == 'Offered' else None
+    entry.status = 'Cancelled'
+    entry.updated_at = datetime.utcnow()
+    log_activity('waitlist_cancelled', f'Cancelled waitlist entry #{entry.id}.', 'WaitlistEntry', entry.id)
+    db.session.flush()
+    if released_offer:
+        offer_released_slot(entry.doctor_id, released_offer)
+    db.session.commit()
+    flash('Waitlist entry cancelled.', 'success')
+    return redirect(url_for('patient.waitlist'))
 
 
 @patient_bp.route('/appointment/<int:appointment_id>/cancel', methods=['POST'])
@@ -388,6 +521,7 @@ def cancel_appointment(appointment_id):
     patient_name = appointment.patient.name if appointment.patient and appointment.patient.name else current_user.username
     log_activity('appointment_cancelled', f'Cancelled appointment #{appointment.id}.', 'Appointment', appointment.id)
     notify_user(appointment.doctor_id, 'Appointment cancelled', f'{patient_name} cancelled the appointment on {appointment.date.strftime("%d %b %Y at %I:%M %p")}.', 'warning', f'/doctor/appointment/{appointment.id}')
+    offer_released_slot(appointment.doctor_id, appointment.date)
     db.session.commit()
 
     flash('Appointment cancelled successfully.', 'success')

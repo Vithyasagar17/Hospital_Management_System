@@ -1,0 +1,15 @@
+{% extends 'layout.html' %}
+{% block title %}Join waitlist{% endblock %}
+{% block page_title %}Join waitlist{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="hms-kicker">Phase 5 smart scheduling</span><h2 class="page-title">Join Dr. {{ doctor.name or 'Doctor' }}'s waitlist</h2><p class="page-subtitle">{{ target_date.strftime('%A, %d %B %Y') }} is fully booked. If a slot opens, the oldest eligible patient gets a temporary offer.</p></div></div>
+<div class="row g-4">
+  <div class="col-xl-7"><div class="hms-panel"><form method="POST" action="{{ url_for('patient.join_waitlist') }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="doctor_id" value="{{ doctor.id }}"><input type="hidden" name="target_date" value="{{ target_date.isoformat() }}">
+    <div class="mb-3"><label class="form-label">Doctor</label><input class="form-control" value="Dr. {{ doctor.name or 'Doctor' }}{% if doctor.specialization %} · {{ doctor.specialization.name }}{% endif %}" disabled></div>
+    <div class="mb-3"><label class="form-label">Waitlist date</label><input class="form-control" value="{{ target_date.strftime('%d %b %Y') }}" disabled></div>
+    <div class="mb-4"><label class="form-label">Reason for visit</label><textarea name="reason" class="form-control" rows="4" required placeholder="Briefly describe why you need the appointment..."></textarea></div>
+    <div class="d-flex gap-2"><button class="btn btn-primary"><i class="bi bi-hourglass-split me-1"></i>Join waitlist</button><a class="btn btn-outline-primary" href="{{ url_for('patient.search_doctors', available_on=target_date.isoformat()) }}">Back</a></div>
+  </form></div></div>
+  <div class="col-xl-5"><div class="hms-panel h-100"><div class="hms-panel-head"><div><span class="hms-kicker">How offers work</span><h3>Fair queue, no surprise booking</h3></div><i class="bi bi-people"></i></div><div class="hms-step-list"><div><span>1</span><p><strong>You join the queue</strong><small>Earlier eligible entries are considered first.</small></p></div><div><span>2</span><p><strong>A slot is released</strong><small>Cancellation or rescheduling can trigger an offer.</small></p></div><div><span>3</span><p><strong>You get 15 minutes</strong><small>Claim the offered time before it moves to the next patient.</small></p></div></div></div></div>
+</div>
+{% endblock %}
