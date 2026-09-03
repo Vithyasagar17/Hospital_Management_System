@@ -33,7 +33,7 @@
   <div class="col-xl-5">
     <div class="hms-panel h-100">
       <div class="hms-panel-head"><div><span class="hms-kicker">Care history</span><h3>Appointment status</h3></div><i class="bi bi-pie-chart"></i></div>
-      {% set total_status = status_counts.Pending + status_counts.Confirmed + status_counts.Completed + status_counts.Cancelled %}
+      {% set total_status = status_counts.Pending + status_counts.Confirmed + status_counts.Completed + status_counts.Cancelled + status_counts['No Show'] %}
       {% if total_status %}<div class="hms-chart-wrap hms-chart-small"><canvas id="patientStatusChart"></canvas></div>{% else %}<div class="hms-empty"><i class="bi bi-pie-chart"></i>Status insights appear after your first booking.</div>{% endif %}
     </div>
   </div>
@@ -47,13 +47,13 @@
 </div>
 {% endblock %}
 {% block scripts %}
-{% set total_status = status_counts.Pending + status_counts.Confirmed + status_counts.Completed + status_counts.Cancelled %}
+{% set total_status = status_counts.Pending + status_counts.Confirmed + status_counts.Completed + status_counts.Cancelled + status_counts['No Show'] %}
 {% if total_status %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script>
 new Chart(document.getElementById('patientStatusChart'), {
   type: 'doughnut',
-  data: { labels: ['Pending','Confirmed','Completed','Cancelled'], datasets: [{ data: [{{ status_counts.Pending }},{{ status_counts.Confirmed }},{{ status_counts.Completed }},{{ status_counts.Cancelled }}], borderWidth: 0 }] },
+  data: { labels: ['Pending','Confirmed','Completed','Cancelled','No Show'], datasets: [{ data: [{{ status_counts.Pending }},{{ status_counts.Confirmed }},{{ status_counts.Completed }},{{ status_counts.Cancelled }},{{ status_counts['No Show'] }}], borderWidth: 0 }] },
   options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } } } }
 });
 </script>

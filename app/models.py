@@ -63,6 +63,9 @@ class Appointment(db.Model):
     notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
     updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+    reschedule_count = db.Column(db.Integer, default=0, nullable=False)
+    last_rescheduled_at = db.Column(db.DateTime, nullable=True)
+    no_show_at = db.Column(db.DateTime, nullable=True)
 
     patient = db.relationship('Patient', backref=db.backref('appointments', lazy=True))
     doctor = db.relationship('Doctor', backref=db.backref('appointments', lazy=True))

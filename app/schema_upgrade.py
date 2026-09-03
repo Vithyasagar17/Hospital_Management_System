@@ -76,3 +76,19 @@ def ensure_phase4_schema():
         "ON user(email) WHERE email IS NOT NULL"
     ))
     db.session.commit()
+
+
+def ensure_phase5_schema():
+    """Add scheduling metadata without resetting an existing Phase 4 database."""
+    inspector = inspect(db.engine)
+    if not inspector.has_table('user'):
+        db.create_all()
+        return
+
+    ensure_phase4_schema()
+    _add_columns('appointment', {
+        'reschedule_count': 'INTEGER NOT NULL DEFAULT 0',
+        'last_rescheduled_at': 'DATETIME',
+        'no_show_at': 'DATETIME',
+    })
+    db.session.commit()

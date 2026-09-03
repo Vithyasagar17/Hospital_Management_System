@@ -6,7 +6,12 @@ from app import db
 from sqlalchemy import or_
 from app.activity import log_activity, notify_user
 from datetime import datetime, timedelta
-from app.scheduling import available_slots_for_doctor, is_valid_booking_slot
+from app.scheduling import (
+    available_slots_for_doctor,
+    is_valid_booking_slot,
+    has_active_doctor_conflict,
+    has_active_patient_conflict,
+)
 
 patient_bp = Blueprint('patient', __name__, url_prefix='/patient')
 
@@ -29,7 +34,7 @@ def patient_dashboard():
 
     status_counts = {
         status: base_query.filter_by(status=status).count()
-        for status in ['Pending', 'Confirmed', 'Completed', 'Cancelled']
+        for status in ['Pending', 'Confirmed', 'Completed', 'Cancelled', 'No Show']
     }
     return render_template(
         'patient_dashboard.html', patient_name=patient_name, upcoming=upcoming,
@@ -127,13 +132,12 @@ def book_appointment():
                 flash('That slot is no longer available. Please choose another time.', 'warning')
                 return redirect(url_for('patient.book_appointment'))
 
-            existing_appointment = Appointment.query.filter(
-                Appointment.doctor_id == doctor_id,
-                Appointment.date == date,
-                Appointment.status != 'Cancelled'
-            ).first()
-            if existing_appointment:
+            if has_active_doctor_conflict(doctor_id, date):
                 flash('That time slot was just booked. Please choose another one.', 'warning')
+                return redirect(url_for('patient.book_appointment'))
+
+            if has_active_patient_conflict(patient.id, date):
+                flash('You already have another active appointment at that time.', 'warning')
                 return redirect(url_for('patient.book_appointment'))
 
             appointment = Appointment(
@@ -177,7 +181,7 @@ def view_appointments():
     date_from_raw = request.args.get('date_from', '')
     date_to_raw = request.args.get('date_to', '')
     query = Appointment.query.join(Doctor, Appointment.doctor_id == Doctor.id).filter(Appointment.patient_id == current_user.id)
-    if status in {'Pending', 'Confirmed', 'Completed', 'Cancelled'}:
+    if status in {'Pending', 'Confirmed', 'Completed', 'Cancelled', 'No Show'}:
         query = query.filter(Appointment.status == status)
     if q:
         query = query.filter(or_(Doctor.name.ilike(f'%{q}%'), Appointment.reason.ilike(f'%{q}%')))
@@ -264,6 +268,97 @@ def view_doctor_profile(doctor_id):
         abort(404)
 
     return render_template('patient_view_doctor_profile.html', doctor=doctor)
+
+
+@patient_bp.route('/appointment/<int:appointment_id>/reschedule', methods=['GET', 'POST'])
+@login_required
+@role_required('Patient')
+def reschedule_appointment(appointment_id):
+    appointment = Appointment.query.get_or_404(appointment_id)
+
+    if appointment.patient_id != current_user.id:
+        abort(403)
+
+    if appointment.status not in ['Pending', 'Confirmed']:
+        flash('Only pending or confirmed appointments can be rescheduled.', 'warning')
+        return redirect(url_for('patient.appointment_detail', appointment_id=appointment.id))
+
+    if appointment.date <= datetime.now():
+        flash('Past appointments can no longer be rescheduled.', 'warning')
+        return redirect(url_for('patient.appointment_detail', appointment_id=appointment.id))
+
+    doctor = appointment.doctor
+    slot_map = available_slots_for_doctor(
+        appointment.doctor_id,
+        days=15,
+        exclude_appointment_id=appointment.id,
+    )
+
+    if request.method == 'POST':
+        date_str = request.form.get('date', '').strip()
+        time_str = request.form.get('time', '').strip()
+
+        try:
+            new_date = datetime.strptime(f"{date_str} {time_str}", '%Y-%m-%d %H:%M')
+        except (ValueError, TypeError):
+            flash('Choose a valid replacement date and time.', 'warning')
+            return redirect(url_for('patient.reschedule_appointment', appointment_id=appointment.id))
+
+        if new_date <= datetime.now():
+            flash('The new appointment time must be in the future.', 'warning')
+            return redirect(url_for('patient.reschedule_appointment', appointment_id=appointment.id))
+
+        if new_date == appointment.date:
+            flash('Choose a different slot to reschedule this appointment.', 'info')
+            return redirect(url_for('patient.reschedule_appointment', appointment_id=appointment.id))
+
+        if not is_valid_booking_slot(appointment.doctor_id, new_date, exclude_appointment_id=appointment.id):
+            flash('That replacement slot is no longer available.', 'warning')
+            return redirect(url_for('patient.reschedule_appointment', appointment_id=appointment.id))
+
+        if has_active_doctor_conflict(appointment.doctor_id, new_date, exclude_appointment_id=appointment.id):
+            flash('That replacement slot was just booked. Please choose another one.', 'warning')
+            return redirect(url_for('patient.reschedule_appointment', appointment_id=appointment.id))
+
+        if has_active_patient_conflict(current_user.id, new_date, exclude_appointment_id=appointment.id):
+            flash('You already have another active appointment at that time.', 'warning')
+            return redirect(url_for('patient.reschedule_appointment', appointment_id=appointment.id))
+
+        old_date = appointment.date
+        previous_status = appointment.status
+        appointment.date = new_date
+        appointment.time = time_str
+        appointment.status = 'Pending'
+        appointment.reschedule_count = (appointment.reschedule_count or 0) + 1
+        appointment.last_rescheduled_at = datetime.utcnow()
+        appointment.updated_at = datetime.utcnow()
+
+        patient_name = appointment.patient.name if appointment.patient and appointment.patient.name else current_user.username
+        doctor_name = doctor.name if doctor and doctor.name else 'Doctor'
+        log_activity(
+            'appointment_rescheduled',
+            f'Appointment #{appointment.id}: {old_date.strftime("%d %b %Y %I:%M %p")} → {new_date.strftime("%d %b %Y %I:%M %p")}; status {previous_status} → Pending.',
+            'Appointment',
+            appointment.id,
+        )
+        notify_user(
+            appointment.doctor_id,
+            'Appointment rescheduled',
+            f'{patient_name} moved appointment #{appointment.id} to {new_date.strftime("%d %b %Y at %I:%M %p")}. Please review the new request.',
+            'warning',
+            f'/doctor/appointment/{appointment.id}',
+        )
+        db.session.commit()
+
+        flash(f'Appointment rescheduled with Dr. {doctor_name}. The new slot is awaiting confirmation.', 'success')
+        return redirect(url_for('patient.appointment_detail', appointment_id=appointment.id))
+
+    return render_template(
+        'reschedule_appointment.html',
+        appointment=appointment,
+        doctor=doctor,
+        slot_map=slot_map,
+    )
 
 
 @patient_bp.route('/appointment/<int:appointment_id>/cancel', methods=['POST'])

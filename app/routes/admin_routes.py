@@ -38,7 +38,7 @@ def admin_dashboard():
 
     status_counts = {
         status: Appointment.query.filter_by(status=status).count()
-        for status in ['Pending', 'Confirmed', 'Completed', 'Cancelled']
+        for status in ['Pending', 'Confirmed', 'Completed', 'Cancelled', 'No Show']
     }
 
     recent_appointments = Appointment.query.order_by(Appointment.created_at.desc()).limit(6).all()
@@ -184,7 +184,7 @@ def admin_appointments():
     date_to = _parse_date(date_to_raw)
 
     query = Appointment.query.join(Doctor, Appointment.doctor_id == Doctor.id).join(Patient, Appointment.patient_id == Patient.id)
-    if status in {'Pending', 'Confirmed', 'Completed', 'Cancelled'}:
+    if status in {'Pending', 'Confirmed', 'Completed', 'Cancelled', 'No Show'}:
         query = query.filter(Appointment.status == status)
     if q:
         query = query.filter(or_(
@@ -245,7 +245,7 @@ def search():
         aq = Appointment.query.join(Doctor, Appointment.doctor_id == Doctor.id).join(Patient, Appointment.patient_id == Patient.id)
         if q:
             aq = aq.filter(or_(Doctor.name.ilike(f'%{q}%'), Patient.name.ilike(f'%{q}%'), Appointment.reason.ilike(f'%{q}%')))
-        if status in {'Pending', 'Confirmed', 'Completed', 'Cancelled'}:
+        if status in {'Pending', 'Confirmed', 'Completed', 'Cancelled', 'No Show'}:
             aq = aq.filter(Appointment.status == status)
         if date_from:
             aq = aq.filter(Appointment.date >= datetime.combine(date_from, datetime.min.time()))

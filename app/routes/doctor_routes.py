@@ -117,7 +117,7 @@ def view_appointments():
     date_from_raw = request.args.get('date_from', '')
     date_to_raw = request.args.get('date_to', '')
     query = Appointment.query.join(Patient, Appointment.patient_id == Patient.id).filter(Appointment.doctor_id == current_user.id)
-    if status in {'Pending', 'Confirmed', 'Completed', 'Cancelled'}:
+    if status in {'Pending', 'Confirmed', 'Completed', 'Cancelled', 'No Show'}:
         query = query.filter(Appointment.status == status)
     if q:
         query = query.filter(or_(Patient.name.ilike(f'%{q}%'), Appointment.reason.ilike(f'%{q}%')))
@@ -131,7 +131,7 @@ def view_appointments():
     except ValueError:
         flash('One of the date filters was invalid and has been ignored.', 'warning')
     appointments = query.order_by(Appointment.date.desc()).all()
-    return render_template('doctor_appointments.html', appointments=appointments, status=status, q=q, date_from=date_from_raw, date_to=date_to_raw)
+    return render_template('doctor_appointments.html', appointments=appointments, status=status, q=q, date_from=date_from_raw, date_to=date_to_raw, now=datetime.now())
 
 
 @doctor_bp.route('/appointment/<int:appointment_id>')
@@ -348,20 +348,27 @@ def update_appointment_status(appointment_id):
     # Valid status transitions
     valid_transitions = {
         'Pending': ['Confirmed', 'Cancelled'],
-        'Confirmed': ['Completed', 'Cancelled'],
+        'Confirmed': ['Completed', 'Cancelled', 'No Show'],
         'Completed': [],
-        'Cancelled': []
+        'Cancelled': [],
+        'No Show': [],
     }
 
     if appointment.status not in valid_transitions or status not in valid_transitions.get(appointment.status, []):
         flash('Invalid status transition.', 'error')
         return redirect(url_for('doctor.view_appointments'))
 
+    if status in ['Completed', 'No Show'] and appointment.date > datetime.now():
+        flash('A future appointment cannot be completed or marked as a no-show yet.', 'warning')
+        return redirect(request.referrer or url_for('doctor.view_appointments'))
+
     previous_status = appointment.status
     appointment.status = status
     if notes:
         appointment.notes = notes
     appointment.updated_at = datetime.utcnow()
+    if status == 'No Show':
+        appointment.no_show_at = datetime.utcnow()
     doctor_name = appointment.doctor.name if appointment.doctor else current_user.username
     log_activity('appointment_status_changed', f'Appointment #{appointment.id}: {previous_status} → {status}.', 'Appointment', appointment.id)
     notify_user(appointment.patient_id, f'Appointment {status.lower()}', f'Dr. {doctor_name} marked your appointment on {appointment.date.strftime("%d %b %Y at %I:%M %p")} as {status.lower()}.', 'success' if status in ['Confirmed', 'Completed'] else 'warning', f'/patient/appointment/{appointment.id}')
@@ -413,6 +420,20 @@ def manage_availability():
             end_dt = datetime.strptime(end_time, '%H:%M')
             if start_dt >= end_dt:
                 flash('End time must be later than start time.', 'warning')
+                return redirect(url_for('doctor.manage_availability'))
+
+            overlapping = DoctorAvailability.query.filter(
+                DoctorAvailability.doctor_id == doctor.id,
+                DoctorAvailability.date == date,
+                DoctorAvailability.is_available.is_(is_available),
+                DoctorAvailability.start_time < end_time,
+                DoctorAvailability.end_time > start_time,
+            ).filter(
+                ~((DoctorAvailability.start_time == start_time) & (DoctorAvailability.end_time == end_time))
+            ).first()
+            if overlapping:
+                kind = 'bookable' if is_available else 'blocked'
+                flash(f'This {kind} window overlaps an existing {kind} window. Edit or remove the existing window first.', 'warning')
                 return redirect(url_for('doctor.manage_availability'))
 
             availability = DoctorAvailability.query.filter_by(
