@@ -1,0 +1,47 @@
+{% extends 'layout.html' %}
+{% block title %}{{ department.name }}{% endblock %}
+{% block page_title %}Department{% endblock %}
+{% block content %}
+<div class="page-header align-items-end">
+  <div><span class="hms-kicker">{{ department.code }} · Hospital department</span><h2 class="page-title">{{ department.name }}</h2><p class="page-subtitle">{{ department.description or 'Manage department identity, leadership, doctor assignment and operational activity.' }}</p></div>
+  <div class="d-flex gap-2"><a href="{{ url_for('admin.departments') }}" class="btn btn-outline-primary"><i class="bi bi-arrow-left me-1"></i>Departments</a><span class="badge align-self-center {{ 'bg-success' if department.is_active else 'bg-secondary' }}">{{ 'Active' if department.is_active else 'Inactive' }}</span></div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon primary"><i class="bi bi-person-badge"></i></span><div><strong>{{ snapshot.active_doctors }}</strong><small>Active doctors</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon info"><i class="bi bi-people"></i></span><div><strong>{{ snapshot.unique_patients }}</strong><small>Patients served</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon success"><i class="bi bi-calendar2-check"></i></span><div><strong>{{ snapshot.appointment_count }}</strong><small>Total appointments</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon warning"><i class="bi bi-calendar2-week"></i></span><div><strong>{{ snapshot.appointments_30d }}</strong><small>Appointments · 30d</small></div></div></div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-5">
+    <div class="hms-panel h-100">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Configuration</span><h3>Department profile</h3></div><i class="bi bi-sliders"></i></div>
+      <form method="POST"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="row g-3"><div class="col-md-8"><label class="form-label">Name</label><input name="name" class="form-control" value="{{ department.name }}" maxlength="120" required></div><div class="col-md-4"><label class="form-label">Code</label><input name="code" class="form-control text-uppercase" value="{{ department.code }}" maxlength="20" required></div></div>
+        <div class="mt-3"><label class="form-label">Location</label><input name="location" class="form-control" value="{{ department.location or '' }}" maxlength="120" placeholder="Block / floor / wing"></div>
+        <div class="mt-3"><label class="form-label">Department head</label><select name="head_doctor_id" class="form-select"><option value="">No department head</option>{% for doctor in head_candidates %}<option value="{{ doctor.id }}" {% if department.head_doctor_id == doctor.id %}selected{% endif %}>Dr. {{ doctor.name }}</option>{% endfor %}</select><div class="form-text">Only active doctors already assigned to this department are eligible.</div></div>
+        <div class="mt-3"><label class="form-label">Description</label><textarea name="description" class="form-control" rows="4" maxlength="500">{{ department.description or '' }}</textarea></div>
+        <button class="btn btn-primary mt-3"><i class="bi bi-check2 me-1"></i>Save department</button>
+      </form>
+      <hr class="my-4">
+      <form method="POST" action="{{ url_for('admin.toggle_department', department_id=department.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">{% if department.is_active %}<button class="btn btn-outline-danger" {% if snapshot.doctor_count %}disabled{% endif %} onclick="return confirm('Deactivate this department?')"><i class="bi bi-pause-circle me-1"></i>Deactivate</button>{% if snapshot.doctor_count %}<div class="form-text mt-2">Reassign all doctors before deactivation.</div>{% endif %}{% else %}<button class="btn btn-success"><i class="bi bi-arrow-counterclockwise me-1"></i>Reactivate</button>{% endif %}</form>
+    </div>
+  </div>
+
+  <div class="col-xl-7">
+    <div class="hms-panel mb-4">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Clinical team</span><h3>Assigned doctors</h3></div><a href="{{ url_for('admin.admin_doctors', department_id=department.id) }}" class="hms-text-link">Open directory <i class="bi bi-arrow-right"></i></a></div>
+      {% if doctors %}<div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>Doctor</th><th>Specialization</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>{% for doctor in doctors %}<tr><td><strong>Dr. {{ doctor.name or 'Doctor' }}</strong></td><td>{{ doctor.specialization.name if doctor.specialization else '—' }}</td><td>{% if department.head_doctor_id == doctor.id %}<span class="badge bg-primary">Department head</span>{% else %}Member{% endif %}</td><td><span class="badge {{ 'bg-danger' if doctor.is_blacklisted else 'bg-success' }}">{{ 'Blacklisted' if doctor.is_blacklisted else 'Active' }}</span></td><td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.edit_doctor', doctor_id=doctor.id) }}">Edit</a></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="hms-empty py-3"><i class="bi bi-person-plus"></i><p>No doctors assigned yet. Assign doctors from the Doctor editor.</p></div>{% endif %}
+    </div>
+
+    <div class="hms-panel">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Workflow snapshot</span><h3>Appointment mix</h3></div><i class="bi bi-activity"></i></div>
+      <div class="hms-status-stack mb-4">{% for label, value, cls in [('Pending',snapshot.pending,'warning'),('Confirmed',snapshot.confirmed,'success'),('Completed',snapshot.completed,'primary'),('Cancelled',snapshot.cancelled,'danger'),('No Show',snapshot.no_show,'secondary')] %}<div class="hms-status-row"><span><i class="hms-status-dot {{ cls }}"></i>{{ label }}</span><strong>{{ value }}</strong></div>{% endfor %}</div>
+      <div class="hms-panel-head mb-2"><div><span class="hms-kicker">Recent activity</span><h3>Latest department appointments</h3></div></div>
+      {% if recent_appointments %}<div class="hms-activity-list">{% for a in recent_appointments %}<div class="hms-activity-item"><span class="hms-activity-icon"><i class="bi bi-calendar2-event"></i></span><div class="flex-grow-1"><strong>{{ a.patient.name if a.patient else 'Patient' }} → Dr. {{ a.doctor.name if a.doctor else 'Doctor' }}</strong><small>{{ a.date.strftime('%d %b %Y · %I:%M %p') }} · {{ a.reason|truncate(50) }}</small></div><span class="badge {% if a.status=='Pending' %}bg-warning{% elif a.status=='Confirmed' %}bg-success{% elif a.status=='Cancelled' %}bg-danger{% elif a.status=='No Show' %}bg-secondary{% else %}bg-primary{% endif %}">{{ a.status }}</span></div>{% endfor %}</div>{% else %}<div class="hms-empty py-3">No department appointments yet.</div>{% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import login_required, current_user
 from app.routes.auth_decorator import role_required
-from app.models import Patient, Doctor, Appointment, Specialization, DoctorAvailability, Prescription, AppointmentReminder, WaitlistEntry
+from app.models import Patient, Doctor, Appointment, Specialization, Department, DoctorAvailability, Prescription, AppointmentReminder, WaitlistEntry
 from app import db
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
@@ -238,13 +238,20 @@ def prescription_detail(prescription_id):
 def search_doctors():
     q = request.args.get('q', '').strip()
     specialization_id = request.args.get('specialization_id', type=int)
+    department_id = request.args.get('department_id', type=int)
     available_on_raw = request.args.get('available_on', '').strip()
 
     query = Doctor.query.filter(Doctor.is_blacklisted.is_(False))
     if q:
-        query = query.filter(or_(Doctor.name.ilike(f'%{q}%'), Doctor.specialization.has(Specialization.name.ilike(f'%{q}%'))))
+        query = query.filter(or_(
+            Doctor.name.ilike(f'%{q}%'),
+            Doctor.specialization.has(Specialization.name.ilike(f'%{q}%')),
+            Doctor.department.has(Department.name.ilike(f'%{q}%')),
+        ))
     if specialization_id:
         query = query.filter(Doctor.specialization_id == specialization_id)
+    if department_id:
+        query = query.filter(Doctor.department_id == department_id)
 
     doctors = query.order_by(Doctor.name).all()
     available_slots = {}
@@ -269,8 +276,10 @@ def search_doctors():
         doctors = filtered
 
     specializations = Specialization.query.order_by(Specialization.name).all()
+    departments = Department.query.filter_by(is_active=True).order_by(Department.name).all()
     return render_template('patient_search_doctors.html', doctors=doctors, query=q,
                            specialization_id=specialization_id, specializations=specializations,
+                           department_id=department_id, departments=departments,
                            available_on=available_on_raw, available_slots=available_slots,
                            waitlistable=waitlistable)
 

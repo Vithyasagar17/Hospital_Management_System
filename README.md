@@ -104,3 +104,26 @@ Before deployment, set a long random `HMS_SECRET_KEY`, serve the app only over H
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
+
+
+## Phase 5 smart scheduling
+
+- Patient appointment rescheduling with conflict-safe slot validation
+- No-show workflow and status analytics
+- 24-hour and 2-hour idempotent appointment reminders
+- Waitlist queue with temporary released-slot offers and patient claim flow
+- Scheduling intelligence for no-shows, reminders, waitlist conversion and doctor utilization
+
+## Phase 6A hospital departments
+
+- First-class department records with code, description, location and active/inactive state
+- Administrator-controlled doctor-to-department assignment
+- Department-head assignment restricted to active doctors in the same department
+- Safe reassignment rules that clear stale department-head relationships
+- Department directory and department detail dashboards
+- Department metrics for doctor count, unique patients, appointments, 30-day volume and workflow status
+- Patient doctor discovery by department in addition to specialization
+- Department context in doctor profiles, booking, and patient-facing doctor profiles
+- Additive schema upgrade; existing Phase 5 data is preserved
+
+See `PHASE6_UPGRADE_NOTES.md` for the Phase 6A demo flow.

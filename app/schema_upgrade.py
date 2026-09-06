@@ -105,3 +105,26 @@ def ensure_phase5_schema():
         "WHERE status IN ('Waiting', 'Offered')"
     ))
     db.session.commit()
+
+
+
+def ensure_phase6_schema():
+    """Add Phase 6A department structure without resetting Phase 5 data."""
+    inspector = inspect(db.engine)
+    fresh_database = not inspector.has_table('user')
+
+    if fresh_database:
+        db.create_all()
+        return
+
+    ensure_phase5_schema()
+
+    from app.models import Department
+    Department.__table__.create(bind=db.engine, checkfirst=True)
+    _add_columns('doctor', {
+        'department_id': 'INTEGER REFERENCES department(id)',
+    })
+    db.session.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_doctor_department_id ON doctor(department_id)"
+    ))
+    db.session.commit()

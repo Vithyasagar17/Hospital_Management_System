@@ -6,6 +6,7 @@
   <div class="hms-kicker">Clinical workspace</div>
   <h2>Welcome, Dr. {{ doctor_name }}.</h2>
   <p>Your day at a glance—appointments needing action, confirmed consultations, and the upcoming schedule.</p>
+  {% if doctor and doctor.department %}<div class="mt-2 small"><i class="bi bi-building me-1"></i><strong>{{ doctor.department.name }}</strong>{% if doctor.department.head_doctor_id == doctor.id %} · Department head{% endif %}{% if doctor.department.location %} · {{ doctor.department.location }}{% endif %}</div>{% endif %}
 </section>
 
 {% if needs_profile %}<div class="alert alert-warning"><i class="bi bi-exclamation-triangle-fill me-2"></i>Your profile is incomplete — please <a href="{{ url_for('doctor.doctor_profile') }}" class="alert-link">complete your profile</a>.</div>{% endif %}

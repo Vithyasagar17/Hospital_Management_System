@@ -33,11 +33,31 @@ class Specialization(db.Model):
     description = db.Column(db.String(255))
 
 
+class Department(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), unique=True, nullable=False)
+    code = db.Column(db.String(20), unique=True, nullable=False)
+    description = db.Column(db.String(500), nullable=True)
+    location = db.Column(db.String(120), nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    head_doctor_id = db.Column(db.Integer, db.ForeignKey('doctor.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+    head_doctor = db.relationship('Doctor', foreign_keys=[head_doctor_id], post_update=True)
+
+
 class Doctor(db.Model):
     id = db.Column(db.Integer, db.ForeignKey('user.id'), primary_key=True)
     name = db.Column(db.String(100))
     specialization_id = db.Column(db.Integer, db.ForeignKey('specialization.id'))
+    department_id = db.Column(db.Integer, db.ForeignKey('department.id'), nullable=True, index=True)
     specialization = db.relationship('Specialization', backref='doctors')
+    department = db.relationship(
+        'Department',
+        foreign_keys=[department_id],
+        backref=db.backref('doctors', lazy=True),
+    )
     is_blacklisted = db.Column(db.Boolean, default=False)
 
 

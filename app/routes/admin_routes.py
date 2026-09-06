@@ -1,12 +1,13 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from app import db
-from app.models import Doctor, Patient, Appointment, Specialization, User, AuditLog
+from app.models import Doctor, Patient, Appointment, Specialization, User, AuditLog, Department
 from app.routes.auth_decorator import role_required
 from app.activity import log_activity, notify_user
 from app.security import send_verification_email, validate_password
 from app.analytics import build_scheduling_analytics, normalize_window
+from app.departments import department_rows, department_snapshot
 from datetime import datetime, timedelta
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
@@ -30,6 +31,7 @@ def admin_dashboard():
     week_start = today - timedelta(days=6)
 
     total_doctors = Doctor.query.filter_by(is_blacklisted=False).count()
+    total_departments = Department.query.filter_by(is_active=True).count()
     total_patients = Patient.query.filter_by(is_blacklisted=False).count()
     total_appointments = Appointment.query.count()
     appointments_today = Appointment.query.filter(
@@ -60,6 +62,7 @@ def admin_dashboard():
     return render_template(
         'admin_dashboard.html',
         total_doctors=total_doctors,
+        total_departments=total_departments,
         total_patients=total_patients,
         total_appointments=total_appointments,
         appointments_today=appointments_today,
@@ -91,6 +94,142 @@ def admin_overview():
     return render_template('admin_overview.html', doctors=doctors, patients=patients, appointments=appointments)
 
 
+@admin_bp.route('/departments', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def departments():
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        code = request.form.get('code', '').strip().upper()
+        description = request.form.get('description', '').strip()
+        location = request.form.get('location', '').strip()
+
+        if not name or not code:
+            flash('Department name and code are required.', 'warning')
+            return redirect(url_for('admin.departments'))
+        if len(code) > 20:
+            flash('Department code must be 20 characters or fewer.', 'warning')
+            return redirect(url_for('admin.departments'))
+
+        duplicate = Department.query.filter(or_(
+            func.lower(Department.name) == name.lower(),
+            func.lower(Department.code) == code.lower(),
+        )).first()
+        if duplicate:
+            flash('A department with that name or code already exists.', 'warning')
+            return redirect(url_for('admin.departments'))
+
+        department = Department(
+            name=name, code=code, description=description or None,
+            location=location or None, is_active=True,
+        )
+        db.session.add(department)
+        db.session.flush()
+        log_activity('department_created', f'Created department {name} ({code}).', 'Department', department.id)
+        db.session.commit()
+        flash(f'Department {name} created.', 'success')
+        return redirect(url_for('admin.department_detail', department_id=department.id))
+
+    status = request.args.get('status', 'active')
+    q = request.args.get('q', '').strip()
+    rows = department_rows()
+    if status in {'active', 'inactive'}:
+        want_active = status == 'active'
+        rows = [row for row in rows if row['department'].is_active is want_active]
+    if q:
+        q_lower = q.lower()
+        rows = [row for row in rows if q_lower in row['department'].name.lower() or q_lower in row['department'].code.lower()]
+    return render_template('admin_departments.html', rows=rows, status=status, q=q)
+
+
+@admin_bp.route('/department/<int:department_id>', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def department_detail(department_id):
+    department = Department.query.get_or_404(department_id)
+
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        code = request.form.get('code', '').strip().upper()
+        description = request.form.get('description', '').strip()
+        location = request.form.get('location', '').strip()
+        head_doctor_id = request.form.get('head_doctor_id', type=int)
+
+        if not name or not code:
+            flash('Department name and code are required.', 'warning')
+            return redirect(url_for('admin.department_detail', department_id=department.id))
+        if len(name) > 120 or len(code) > 20:
+            flash('Department name or code is too long.', 'warning')
+            return redirect(url_for('admin.department_detail', department_id=department.id))
+
+        duplicate = Department.query.filter(
+            Department.id != department.id,
+            or_(func.lower(Department.name) == name.lower(), func.lower(Department.code) == code.lower()),
+        ).first()
+        if duplicate:
+            flash('Another department already uses that name or code.', 'warning')
+            return redirect(url_for('admin.department_detail', department_id=department.id))
+
+        head = None
+        if head_doctor_id:
+            head = Doctor.query.filter_by(id=head_doctor_id, department_id=department.id, is_blacklisted=False).first()
+            if not head:
+                flash('Department head must be an active doctor assigned to this department.', 'warning')
+                return redirect(url_for('admin.department_detail', department_id=department.id))
+
+        old_head_id = department.head_doctor_id
+        department.name = name
+        department.code = code
+        department.description = description or None
+        department.location = location or None
+        department.head_doctor_id = head.id if head else None
+        log_activity(
+            'department_updated',
+            f'Updated department {name} ({code}); head {old_head_id or "none"} → {department.head_doctor_id or "none"}.',
+            'Department', department.id,
+        )
+        if head and old_head_id != head.id:
+            notify_user(head.id, 'Department leadership assignment', f'You are now the head of {name}.', 'success', '/doctor/profile')
+        db.session.commit()
+        flash(f'Department {name} updated.', 'success')
+        return redirect(url_for('admin.department_detail', department_id=department.id))
+
+    snapshot = department_snapshot(department.id)
+    doctors = Doctor.query.filter_by(department_id=department.id).order_by(Doctor.name).all()
+    head_candidates = [doctor for doctor in doctors if not doctor.is_blacklisted]
+    recent_appointments = Appointment.query.join(Doctor, Appointment.doctor_id == Doctor.id).filter(
+        Doctor.department_id == department.id
+    ).order_by(Appointment.date.desc()).limit(8).all()
+    return render_template(
+        'admin_department_detail.html', department=department, snapshot=snapshot,
+        doctors=doctors, head_candidates=head_candidates, recent_appointments=recent_appointments,
+    )
+
+
+@admin_bp.route('/department/<int:department_id>/toggle', methods=['POST'])
+@login_required
+@role_required('Admin')
+def toggle_department(department_id):
+    department = Department.query.get_or_404(department_id)
+    if department.is_active:
+        assigned = Doctor.query.filter_by(department_id=department.id).count()
+        if assigned:
+            flash('Reassign all doctors before deactivating this department.', 'warning')
+            return redirect(url_for('admin.department_detail', department_id=department.id))
+        department.is_active = False
+        department.head_doctor_id = None
+        action = 'department_deactivated'
+        message = f'Department {department.name} deactivated.'
+    else:
+        department.is_active = True
+        action = 'department_reactivated'
+        message = f'Department {department.name} reactivated.'
+    log_activity(action, message, 'Department', department.id)
+    db.session.commit()
+    flash(message, 'success')
+    return redirect(url_for('admin.departments', status='active' if department.is_active else 'inactive'))
+
+
 @admin_bp.route('/doctors')
 @login_required
 @role_required('Admin')
@@ -98,17 +237,26 @@ def admin_doctors():
     status = request.args.get('status', 'active')
     q = request.args.get('q', '').strip()
     specialization_id = request.args.get('specialization_id', type=int)
+    department_id = request.args.get('department_id', type=int)
 
     query = Doctor.query
     query = query.filter(Doctor.is_blacklisted.is_(status == 'blacklisted'))
     if q:
-        query = query.filter(Doctor.name.ilike(f'%{q}%'))
+        query = query.filter(or_(
+            Doctor.name.ilike(f'%{q}%'),
+            Doctor.specialization.has(Specialization.name.ilike(f'%{q}%')),
+            Doctor.department.has(Department.name.ilike(f'%{q}%')),
+        ))
     if specialization_id:
         query = query.filter(Doctor.specialization_id == specialization_id)
+    if department_id:
+        query = query.filter(Doctor.department_id == department_id)
     doctors = query.order_by(Doctor.name).all()
     specializations = Specialization.query.order_by(Specialization.name).all()
+    departments = Department.query.order_by(Department.name).all()
     return render_template('admin_doctors.html', doctors=doctors, status=status, q=q,
-                           specialization_id=specialization_id, specializations=specializations)
+                           specialization_id=specialization_id, specializations=specializations,
+                           department_id=department_id, departments=departments)
 
 
 @admin_bp.route('/doctor/add', methods=['GET', 'POST'])
@@ -116,6 +264,7 @@ def admin_doctors():
 @role_required('Admin')
 def add_doctor():
     specializations = Specialization.query.order_by(Specialization.name).all()
+    departments = Department.query.filter_by(is_active=True).order_by(Department.name).all()
 
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
@@ -123,6 +272,7 @@ def add_doctor():
         password = request.form.get('password', '')
         name = request.form.get('name', '').strip()
         specialization_id = request.form.get('specialization_id')
+        department_id = request.form.get('department_id')
 
         password_ok, password_error = validate_password(password)
         if not username or not email or not password or not name:
@@ -139,12 +289,19 @@ def add_doctor():
             spec_id = int(specialization_id) if specialization_id else None
         except ValueError:
             spec_id = None
+        try:
+            dept_id = int(department_id) if department_id else None
+        except ValueError:
+            dept_id = None
+        if dept_id and not Department.query.filter_by(id=dept_id, is_active=True).first():
+            flash('Choose an active department.', 'warning')
+            return redirect(url_for('admin.add_doctor'))
 
         user = User(username=username, email=email, email_verified=False, role='Doctor', session_version=1)
         user.set_password(password)
         db.session.add(user)
         db.session.flush()
-        doctor = Doctor(id=user.id, name=name, specialization_id=spec_id)
+        doctor = Doctor(id=user.id, name=name, specialization_id=spec_id, department_id=dept_id)
         db.session.add(doctor)
         log_activity('doctor_created', f'Added doctor {name} ({username}).', 'Doctor', user.id)
         notify_user(user.id, 'Doctor account created', 'Your doctor workspace is ready. Complete your profile and availability.', 'success', '/doctor/dashboard')
@@ -154,7 +311,7 @@ def add_doctor():
         flash(f'Doctor {name} added. A verification link was sent to {email}.', 'success')
         return redirect(url_for('admin.admin_doctors'))
 
-    return render_template('admin_add_doctor.html', specializations=specializations)
+    return render_template('admin_add_doctor.html', specializations=specializations, departments=departments)
 
 
 @admin_bp.route('/patients')
@@ -311,10 +468,12 @@ def audit_logs():
 def edit_doctor(doctor_id):
     doctor = Doctor.query.get_or_404(doctor_id)
     specializations = Specialization.query.order_by(Specialization.name).all()
+    departments = Department.query.order_by(Department.name).all()
 
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
         specialization_id = request.form.get('specialization_id')
+        department_id = request.form.get('department_id')
         if not name:
             flash('Doctor name is required.', 'warning')
             return redirect(url_for('admin.edit_doctor', doctor_id=doctor_id))
@@ -323,11 +482,24 @@ def edit_doctor(doctor_id):
             doctor.specialization_id = int(specialization_id) if specialization_id else None
         except ValueError:
             doctor.specialization_id = None
+        try:
+            new_department_id = int(department_id) if department_id else None
+        except ValueError:
+            new_department_id = None
+        if new_department_id and not Department.query.filter_by(id=new_department_id, is_active=True).first():
+            flash('Choose an active department.', 'warning')
+            return redirect(url_for('admin.edit_doctor', doctor_id=doctor_id))
+        old_department_id = doctor.department_id
+        if old_department_id != new_department_id:
+            for led_department in Department.query.filter_by(head_doctor_id=doctor.id).all():
+                led_department.head_doctor_id = None
+            doctor.department_id = new_department_id
+            notify_user(doctor.id, 'Department assignment updated', 'Your hospital department assignment has changed. Open your profile for details.', 'info', '/doctor/profile')
         log_activity('doctor_updated', f'Updated doctor profile for {name}.', 'Doctor', doctor.id)
         db.session.commit()
         flash(f'Doctor {name} updated successfully.', 'success')
         return redirect(url_for('admin.admin_doctors'))
-    return render_template('admin_edit_doctor.html', doctor=doctor, specializations=specializations)
+    return render_template('admin_edit_doctor.html', doctor=doctor, specializations=specializations, departments=departments)
 
 
 @admin_bp.route('/patient/<int:patient_id>/edit', methods=['GET', 'POST'])
@@ -369,6 +541,8 @@ def edit_patient(patient_id):
 def blacklist_doctor(doctor_id):
     doctor = Doctor.query.get_or_404(doctor_id)
     doctor.is_blacklisted = True
+    for department in Department.query.filter_by(head_doctor_id=doctor.id).all():
+        department.head_doctor_id = None
     log_activity('doctor_blacklisted', f'Blacklisted doctor {doctor.name}.', 'Doctor', doctor.id)
     notify_user(doctor.id, 'Account access changed', 'Your doctor account has been blacklisted by an administrator.', 'warning', '/doctor/dashboard')
     db.session.commit()

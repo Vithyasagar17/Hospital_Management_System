@@ -52,7 +52,7 @@ def doctor_dashboard():
         chart_values.append(sum(1 for appt in week_appointments if appt.date and appt.date.date() == day))
 
     return render_template(
-        'doctor_dashboard.html', doctor_name=doctor_name, needs_profile=needs_profile,
+        'doctor_dashboard.html', doctor=doctor, doctor_name=doctor_name, needs_profile=needs_profile,
         today_appointments=today_appointments, pending_count=pending_count,
         confirmed_count=confirmed_count, completed_count=completed_count,
         upcoming=upcoming, chart_labels=chart_labels, chart_values=chart_values

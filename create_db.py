@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timedelta
 from app import create_app, db
-from app.models import User, Specialization, Doctor, Patient, DoctorAvailability, Appointment, Prescription, PrescriptionItem, Notification, AuditLog
+from app.models import User, Specialization, Department, Doctor, Patient, DoctorAvailability, Appointment, Prescription, PrescriptionItem, Notification, AuditLog
 
 app = create_app()
 
@@ -96,6 +96,24 @@ with app.app_context():
 
     db.session.commit()
 
+    # Phase 6A hospital departments. These are organizational units;
+    # specializations remain the doctor's clinical discipline.
+    departments_list = [
+        ('General Medicine', 'GEN', 'Primary medical care and general inpatient/outpatient services', 'Block A · Floor 1'),
+        ('Cardiology', 'CARD', 'Cardiovascular consultation and specialty care', 'Block B · Floor 2'),
+        ('Neurology', 'NEURO', 'Neurological consultation and nervous-system care', 'Block B · Floor 3'),
+        ('Orthopedics', 'ORTHO', 'Bone, joint, trauma and musculoskeletal services', 'Block C · Floor 1'),
+        ('Pediatrics', 'PEDS', 'Child and adolescent healthcare services', 'Block A · Floor 2'),
+        ('Emergency Medicine', 'ER', 'Emergency assessment and stabilization', 'Emergency Wing'),
+    ]
+    for department_name, code, description, location in departments_list:
+        if not Department.query.filter_by(code=code).first():
+            db.session.add(Department(
+                name=department_name, code=code, description=description,
+                location=location, is_active=True,
+            ))
+    db.session.commit()
+
     if not User.query.filter_by(username='dr_sample').first():
         doctor_user = User(username='dr_sample', email='doctor@medora.local', email_verified=True, role='Doctor')
         doctor_user.set_password('doctorpass')
@@ -103,9 +121,17 @@ with app.app_context():
         db.session.commit()
 
         gen_med = Specialization.query.filter_by(name='General Medicine').first()
-        doctor = Doctor(id=doctor_user.id, name='Alice Smith', specialization_id=gen_med.id if gen_med else None)
+        gen_dept = Department.query.filter_by(code='GEN').first()
+        doctor = Doctor(
+            id=doctor_user.id, name='Alice Smith',
+            specialization_id=gen_med.id if gen_med else None,
+            department_id=gen_dept.id if gen_dept else None,
+        )
         db.session.add(doctor)
         db.session.commit()
+        if gen_dept and not gen_dept.head_doctor_id:
+            gen_dept.head_doctor_id = doctor.id
+            db.session.commit()
 
     # Seed demo booking windows for the sample doctor so the live-slot workflow
     # is immediately usable after recreating the database.
