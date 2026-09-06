@@ -137,4 +137,13 @@ python -m pytest -q
 - Safety rules that reserve `Occupied` state for the upcoming admission workflow
 - Additive schema upgrade with no database reset
 
-See `PHASE6_UPGRADE_NOTES.md` for the Phase 6A and 6B.1 demo flows.
+### Phase 6B.2 admissions, transfers & discharge
+
+- Inpatient admission records linked to patient, doctor, department, ward and bed
+- Automatic bed occupation/release on admission, transfer and discharge
+- Bed-transfer history with non-destructive movement tracking
+- Admin and Doctor inpatient workspaces plus Patient hospital-stay history
+- One-active-admission-per-patient and one-active-patient-per-bed concurrency safeguards
+- Admission/transfer/discharge audit logging and notifications
+
+See `PHASE6_UPGRADE_NOTES.md` for the Phase 6A, 6B.1 and 6B.2 demo flows.

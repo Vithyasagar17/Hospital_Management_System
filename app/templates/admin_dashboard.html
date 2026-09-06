@@ -21,6 +21,7 @@
   <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon info"><i class="bi bi-grid-3x3-gap"></i></span><div><strong>{{ bed_snapshot.total_beds }}</strong><small>Total beds</small></div></div></div>
   <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon success"><i class="bi bi-check2-circle"></i></span><div><strong>{{ bed_snapshot.available }}</strong><small>Available beds</small></div></div></div>
   <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon warning"><i class="bi bi-bookmark-check"></i></span><div><strong>{{ bed_snapshot.reserved }}</strong><small>Reserved beds</small></div></div></div>
+  <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon info"><i class="bi bi-person-heart"></i></span><div><strong>{{ active_inpatients }}</strong><small>Current inpatients</small></div></div></div>
   <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon info"><i class="bi bi-percent"></i></span><div><strong>{{ bed_snapshot.occupancy_rate }}%</strong><small>Bed occupancy</small></div></div></div>
 </div>
 
@@ -68,6 +69,7 @@
         <a href="{{ url_for('admin.admin_doctors') }}"><span><i class="bi bi-person-badge"></i></span><div><strong>Doctors</strong><small>Manage medical staff</small></div><i class="bi bi-chevron-right"></i></a>
         <a href="{{ url_for('admin.departments') }}"><span><i class="bi bi-buildings"></i></span><div><strong>Departments</strong><small>Structure teams and assign leadership</small></div><i class="bi bi-chevron-right"></i></a>
         <a href="{{ url_for('admin.wards') }}"><span><i class="bi bi-hospital"></i></span><div><strong>Wards & beds</strong><small>Manage inpatient capacity and bed states</small></div><i class="bi bi-chevron-right"></i></a>
+        <a href="{{ url_for('admin.admissions') }}"><span><i class="bi bi-person-heart"></i></span><div><strong>Admissions</strong><small>Allocate beds, transfer and discharge patients</small></div><i class="bi bi-chevron-right"></i></a>
         <a href="{{ url_for('admin.admin_patients') }}"><span><i class="bi bi-people"></i></span><div><strong>Patients</strong><small>Maintain patient records</small></div><i class="bi bi-chevron-right"></i></a>
         <a href="{{ url_for('admin.search') }}"><span><i class="bi bi-search"></i></span><div><strong>Advanced search</strong><small>Filter every record type</small></div><i class="bi bi-chevron-right"></i></a>
         <a href="{{ url_for('admin.audit_logs') }}"><span><i class="bi bi-shield-check"></i></span><div><strong>Audit logs</strong><small>{{ audit_24h }} events in the last 24h</small></div><i class="bi bi-chevron-right"></i></a>

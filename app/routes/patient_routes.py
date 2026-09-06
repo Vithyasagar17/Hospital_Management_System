@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import login_required, current_user
 from app.routes.auth_decorator import role_required
-from app.models import Patient, Doctor, Appointment, Specialization, Department, DoctorAvailability, Prescription, AppointmentReminder, WaitlistEntry
+from app.models import Patient, Doctor, Appointment, Specialization, Department, DoctorAvailability, Prescription, AppointmentReminder, WaitlistEntry, Admission
 from app import db
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
@@ -13,6 +13,7 @@ from app.scheduling import (
     has_active_doctor_conflict,
     has_active_patient_conflict,
 )
+from app.inpatient import active_admission_for_patient
 from app.waitlist import (
     active_waitlist_entry,
     claim_waitlist_offer,
@@ -39,6 +40,8 @@ def patient_dashboard():
     confirmed_count = base_query.filter_by(status='Confirmed').count()
     completed_count = base_query.filter_by(status='Completed').count()
 
+    current_admission = active_admission_for_patient(current_user.id)
+
     status_counts = {
         status: base_query.filter_by(status=status).count()
         for status in ['Pending', 'Confirmed', 'Completed', 'Cancelled', 'No Show']
@@ -46,7 +49,8 @@ def patient_dashboard():
     return render_template(
         'patient_dashboard.html', patient_name=patient_name, upcoming=upcoming,
         pending_count=pending_count, confirmed_count=confirmed_count,
-        completed_count=completed_count, status_counts=status_counts
+        completed_count=completed_count, status_counts=status_counts,
+        current_admission=current_admission
     )
 
 
@@ -104,6 +108,29 @@ def medical_history():
         .order_by(Appointment.date.desc())\
         .all()
     return render_template('medical_history.html', appointments=appointments)
+
+@patient_bp.route('/admissions')
+@login_required
+@role_required('Patient')
+def admissions():
+    rows = Admission.query.filter_by(patient_id=current_user.id).order_by(Admission.admitted_at.desc()).all()
+    return render_template('patient_admissions.html', admissions=rows)
+
+
+@patient_bp.route('/admission/<int:admission_id>')
+@login_required
+@role_required('Patient')
+def admission_detail(admission_id):
+    admission = Admission.query.get_or_404(admission_id)
+    if admission.patient_id != current_user.id:
+        abort(403)
+    transfers = sorted(admission.transfers, key=lambda item: item.transferred_at, reverse=True)
+    return render_template(
+        'inpatient_admission_detail.html', admission=admission, transfers=transfers,
+        transfer_beds=[], viewer_role='Patient', transfer_url=None, discharge_url=None,
+        back_url=url_for('patient.admissions'),
+    )
+
 
 @patient_bp.route('/book_appointment', methods=['GET', 'POST'])
 @login_required

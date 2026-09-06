@@ -128,9 +128,20 @@ def ensure_phase6_schema():
         "CREATE INDEX IF NOT EXISTS ix_doctor_department_id ON doctor(department_id)"
     ))
 
-    # Phase 6B.1: inpatient capacity infrastructure. Admissions are added in
-    # the next slice, so existing databases can safely gain wards and beds
-    # without changing appointment or patient data.
+    # Phase 6B.1: inpatient capacity infrastructure.
     Ward.__table__.create(bind=db.engine, checkfirst=True)
     Bed.__table__.create(bind=db.engine, checkfirst=True)
+
+    # Phase 6B.2: admissions, transfer history and discharge workflow.
+    from app.models import Admission, BedTransfer
+    Admission.__table__.create(bind=db.engine, checkfirst=True)
+    BedTransfer.__table__.create(bind=db.engine, checkfirst=True)
+    db.session.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_admission_active_patient_unique "
+        "ON admission(patient_id) WHERE status = 'Active'"
+    ))
+    db.session.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_admission_active_bed_unique "
+        "ON admission(bed_id) WHERE status = 'Active'"
+    ))
     db.session.commit()

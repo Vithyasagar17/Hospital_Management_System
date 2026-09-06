@@ -136,6 +136,71 @@ class Appointment(db.Model):
         return next((p for p in self.prescriptions if not getattr(p, 'is_deleted', False)), None)
 
 
+class Admission(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    patient_id = db.Column(db.Integer, db.ForeignKey('patient.id'), nullable=False, index=True)
+    doctor_id = db.Column(db.Integer, db.ForeignKey('doctor.id'), nullable=False, index=True)
+    department_id = db.Column(db.Integer, db.ForeignKey('department.id'), nullable=False, index=True)
+    ward_id = db.Column(db.Integer, db.ForeignKey('ward.id'), nullable=False, index=True)
+    bed_id = db.Column(db.Integer, db.ForeignKey('bed.id'), nullable=False, index=True)
+    appointment_id = db.Column(db.Integer, db.ForeignKey('appointment.id'), nullable=True, index=True)
+    admitted_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False, index=True)
+    reason = db.Column(db.Text, nullable=False)
+    diagnosis = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(20), default='Active', nullable=False, index=True)
+    discharged_at = db.Column(db.DateTime, nullable=True)
+    discharge_summary = db.Column(db.Text, nullable=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    discharged_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+    patient = db.relationship('Patient', backref=db.backref('admissions', lazy=True), foreign_keys=[patient_id])
+    doctor = db.relationship('Doctor', backref=db.backref('admissions', lazy=True), foreign_keys=[doctor_id])
+    department = db.relationship('Department', backref=db.backref('admissions', lazy=True), foreign_keys=[department_id])
+    ward = db.relationship('Ward', backref=db.backref('admissions', lazy=True), foreign_keys=[ward_id])
+    bed = db.relationship('Bed', backref=db.backref('admissions', lazy=True), foreign_keys=[bed_id])
+    appointment = db.relationship('Appointment', backref=db.backref('admissions', lazy=True), foreign_keys=[appointment_id])
+    created_by = db.relationship('User', foreign_keys=[created_by_id])
+    discharged_by = db.relationship('User', foreign_keys=[discharged_by_id])
+
+    __table_args__ = (
+        db.Index(
+            'ix_admission_active_patient_unique',
+            'patient_id',
+            unique=True,
+            sqlite_where=text("status = 'Active'"),
+            postgresql_where=text("status = 'Active'"),
+        ),
+        db.Index(
+            'ix_admission_active_bed_unique',
+            'bed_id',
+            unique=True,
+            sqlite_where=text("status = 'Active'"),
+            postgresql_where=text("status = 'Active'"),
+        ),
+    )
+
+
+class BedTransfer(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    admission_id = db.Column(db.Integer, db.ForeignKey('admission.id'), nullable=False, index=True)
+    from_ward_id = db.Column(db.Integer, db.ForeignKey('ward.id'), nullable=False)
+    from_bed_id = db.Column(db.Integer, db.ForeignKey('bed.id'), nullable=False)
+    to_ward_id = db.Column(db.Integer, db.ForeignKey('ward.id'), nullable=False)
+    to_bed_id = db.Column(db.Integer, db.ForeignKey('bed.id'), nullable=False)
+    reason = db.Column(db.String(500), nullable=True)
+    transferred_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False, index=True)
+    transferred_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+
+    admission = db.relationship('Admission', backref=db.backref('transfers', lazy=True, cascade='all, delete-orphan'))
+    from_ward = db.relationship('Ward', foreign_keys=[from_ward_id])
+    from_bed = db.relationship('Bed', foreign_keys=[from_bed_id])
+    to_ward = db.relationship('Ward', foreign_keys=[to_ward_id])
+    to_bed = db.relationship('Bed', foreign_keys=[to_bed_id])
+    transferred_by = db.relationship('User', foreign_keys=[transferred_by_id])
+
+
 class Prescription(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     appointment_id = db.Column(db.Integer, db.ForeignKey('appointment.id'), nullable=False)

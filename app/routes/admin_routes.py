@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 from sqlalchemy import or_, func, and_
 from app import db
-from app.models import Doctor, Patient, Appointment, Specialization, User, AuditLog, Department, Ward, Bed
+from app.models import Doctor, Patient, Appointment, Specialization, User, AuditLog, Department, Ward, Bed, Admission
 from app.routes.auth_decorator import role_required
 from app.activity import log_activity, notify_user
 from app.security import send_verification_email, validate_password
@@ -10,9 +10,11 @@ from app.analytics import build_scheduling_analytics, normalize_window
 from app.departments import department_rows, department_snapshot
 from app.inpatient import (
     ADMIN_SETTABLE_BED_STATUSES, WARD_TYPES,
-    department_bed_snapshot, hospital_bed_snapshot, ward_snapshot,
+    admit_patient, available_beds, department_bed_snapshot, discharge_admission,
+    hospital_bed_snapshot, transfer_admission, ward_snapshot,
 )
 from datetime import datetime, timedelta
+from sqlalchemy.exc import IntegrityError
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -39,6 +41,7 @@ def admin_dashboard():
     total_patients = Patient.query.filter_by(is_blacklisted=False).count()
     total_appointments = Appointment.query.count()
     bed_snapshot = hospital_bed_snapshot()
+    active_inpatients = Admission.query.filter_by(status='Active').count()
     appointments_today = Appointment.query.filter(
         Appointment.date >= datetime.combine(today, datetime.min.time()),
         Appointment.date < datetime.combine(tomorrow, datetime.min.time())
@@ -71,6 +74,7 @@ def admin_dashboard():
         total_patients=total_patients,
         total_appointments=total_appointments,
         bed_snapshot=bed_snapshot,
+        active_inpatients=active_inpatients,
         appointments_today=appointments_today,
         status_counts=status_counts,
         recent_appointments=recent_appointments,
@@ -368,10 +372,14 @@ def ward_detail(ward_id):
 
     snapshot = ward_snapshot(ward.id)
     beds = Bed.query.filter_by(ward_id=ward.id).order_by(Bed.bed_number).all()
+    active_rows = Admission.query.filter(
+        Admission.ward_id == ward.id, Admission.status == 'Active'
+    ).all()
+    occupant_by_bed = {row.bed_id: row for row in active_rows}
     return render_template(
         'admin_ward_detail.html', ward=ward, snapshot=snapshot, beds=beds,
         departments=departments, ward_types=WARD_TYPES,
-        bed_statuses=ADMIN_SETTABLE_BED_STATUSES,
+        bed_statuses=ADMIN_SETTABLE_BED_STATUSES, occupant_by_bed=occupant_by_bed,
     )
 
 
@@ -745,6 +753,9 @@ def edit_doctor(doctor_id):
             return redirect(url_for('admin.edit_doctor', doctor_id=doctor_id))
         old_department_id = doctor.department_id
         if old_department_id != new_department_id:
+            if Admission.query.filter_by(doctor_id=doctor.id, status='Active').count():
+                flash('Discharge or reassign the doctor’s active inpatients before changing departments.', 'warning')
+                return redirect(url_for('admin.edit_doctor', doctor_id=doctor_id))
             for led_department in Department.query.filter_by(head_doctor_id=doctor.id).all():
                 led_department.head_doctor_id = None
             doctor.department_id = new_department_id
@@ -789,11 +800,162 @@ def edit_patient(patient_id):
     return render_template('admin_edit_patient.html', patient=patient)
 
 
+@admin_bp.route('/admissions', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def admissions():
+    if request.method == 'POST':
+        patient_id = request.form.get('patient_id', type=int)
+        doctor_id = request.form.get('doctor_id', type=int)
+        bed_id = request.form.get('bed_id', type=int)
+        appointment_id = request.form.get('appointment_id', type=int)
+        reason = request.form.get('reason', '').strip()
+        diagnosis = request.form.get('diagnosis', '').strip()
+        bed = db.session.get(Bed, bed_id) if bed_id else None
+
+        try:
+            if not bed or not bed.ward:
+                raise ValueError('Choose an available inpatient bed.')
+            admission = admit_patient(
+                patient_id=patient_id,
+                doctor_id=doctor_id,
+                department_id=bed.ward.department_id,
+                bed_id=bed.id,
+                appointment_id=appointment_id,
+                reason=reason,
+                diagnosis=diagnosis,
+                created_by_id=current_user.id,
+            )
+            patient_name = admission.patient.name or f'Patient #{admission.patient_id}'
+            doctor_name = admission.doctor.name or f'Doctor #{admission.doctor_id}'
+            log_activity(
+                'patient_admitted',
+                f'Admitted {patient_name} to {admission.ward.name} / bed {admission.bed.bed_number} under {doctor_name}.',
+                'Admission', admission.id,
+            )
+            notify_user(
+                admission.patient_id,
+                'Inpatient admission created',
+                f'You were admitted to {admission.ward.name}, bed {admission.bed.bed_number}, under Dr. {doctor_name}.',
+                'info',
+                f'/patient/admission/{admission.id}',
+            )
+            if admission.doctor_id != current_user.id:
+                notify_user(
+                    admission.doctor_id,
+                    'Patient admitted under your care',
+                    f'{patient_name} was admitted to {admission.ward.name}, bed {admission.bed.bed_number}.',
+                    'info',
+                    f'/doctor/inpatient/{admission.id}',
+                )
+            db.session.commit()
+            flash(f'{patient_name} admitted successfully.', 'success')
+            return redirect(url_for('admin.admission_detail', admission_id=admission.id))
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'warning')
+        except IntegrityError:
+            db.session.rollback()
+            flash('The patient or bed was assigned by another request. Refresh and try again.', 'warning')
+        return redirect(url_for('admin.admissions'))
+
+    status = request.args.get('status', 'Active')
+    q = request.args.get('q', '').strip()
+    query = Admission.query.join(Patient, Admission.patient_id == Patient.id).join(
+        Doctor, Admission.doctor_id == Doctor.id
+    ).join(Ward, Admission.ward_id == Ward.id).join(Bed, Admission.bed_id == Bed.id)
+    if status in {'Active', 'Discharged'}:
+        query = query.filter(Admission.status == status)
+    if q:
+        query = query.filter(or_(
+            Patient.name.ilike(f'%{q}%'), Doctor.name.ilike(f'%{q}%'),
+            Ward.name.ilike(f'%{q}%'), Bed.bed_number.ilike(f'%{q}%'),
+            Admission.reason.ilike(f'%{q}%'),
+        ))
+    rows = query.order_by(Admission.admitted_at.desc()).all()
+    patients = Patient.query.filter_by(is_blacklisted=False).order_by(Patient.name).all()
+    doctors = Doctor.query.join(Department, Doctor.department_id == Department.id).filter(
+        Doctor.is_blacklisted.is_(False), Department.is_active.is_(True)
+    ).order_by(Doctor.name).all()
+    beds = available_beds()
+    return render_template(
+        'admin_admissions.html', admissions=rows, patients=patients, doctors=doctors,
+        beds=beds, status=status, q=q,
+    )
+
+
+@admin_bp.route('/admission/<int:admission_id>')
+@login_required
+@role_required('Admin')
+def admission_detail(admission_id):
+    admission = Admission.query.get_or_404(admission_id)
+    transfer_beds = available_beds(admission.department_id) if admission.status == 'Active' else []
+    transfers = sorted(admission.transfers, key=lambda item: item.transferred_at, reverse=True)
+    return render_template(
+        'inpatient_admission_detail.html', admission=admission, transfers=transfers,
+        transfer_beds=transfer_beds, viewer_role='Admin',
+        transfer_url=url_for('admin.transfer_admission_route', admission_id=admission.id),
+        discharge_url=url_for('admin.discharge_admission_route', admission_id=admission.id),
+        back_url=url_for('admin.admissions'),
+    )
+
+
+@admin_bp.route('/admission/<int:admission_id>/transfer', methods=['POST'])
+@login_required
+@role_required('Admin')
+def transfer_admission_route(admission_id):
+    admission = Admission.query.get_or_404(admission_id)
+    to_bed_id = request.form.get('bed_id', type=int)
+    reason = request.form.get('reason', '').strip()
+    try:
+        old_label = f'{admission.ward.name} / {admission.bed.bed_number}'
+        transfer = transfer_admission(
+            admission, to_bed_id=to_bed_id,
+            transferred_by_id=current_user.id, reason=reason,
+        )
+        new_label = f'{transfer.to_ward.name} / {transfer.to_bed.bed_number}'
+        log_activity('inpatient_transferred', f'Admission #{admission.id}: {old_label} → {new_label}.', 'Admission', admission.id)
+        notify_user(admission.patient_id, 'Inpatient bed transfer', f'Your inpatient location changed from {old_label} to {new_label}.', 'info', f'/patient/admission/{admission.id}')
+        notify_user(admission.doctor_id, 'Patient bed transfer', f'{admission.patient.name or "Patient"} moved from {old_label} to {new_label}.', 'info', f'/doctor/inpatient/{admission.id}')
+        db.session.commit()
+        flash(f'Patient transferred to {new_label}.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    except IntegrityError:
+        db.session.rollback()
+        flash('That destination bed was assigned by another request. Choose another bed.', 'warning')
+    return redirect(url_for('admin.admission_detail', admission_id=admission.id))
+
+
+@admin_bp.route('/admission/<int:admission_id>/discharge', methods=['POST'])
+@login_required
+@role_required('Admin')
+def discharge_admission_route(admission_id):
+    admission = Admission.query.get_or_404(admission_id)
+    summary = request.form.get('summary', '').strip()
+    try:
+        released_bed = f'{admission.ward.name} / {admission.bed.bed_number}'
+        discharge_admission(admission, summary=summary, discharged_by_id=current_user.id)
+        log_activity('patient_discharged', f'Discharged admission #{admission.id}; released {released_bed}.', 'Admission', admission.id)
+        notify_user(admission.patient_id, 'Hospital discharge recorded', 'Your inpatient stay has been discharged. The discharge summary is available in your admission history.', 'success', f'/patient/admission/{admission.id}')
+        notify_user(admission.doctor_id, 'Patient discharged', f'{admission.patient.name or "Patient"} was discharged from {released_bed}.', 'success', f'/doctor/inpatient/{admission.id}')
+        db.session.commit()
+        flash('Patient discharged and bed released.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.admission_detail', admission_id=admission.id))
+
+
 @admin_bp.route('/doctor/<int:doctor_id>/blacklist', methods=['POST'])
 @login_required
 @role_required('Admin')
 def blacklist_doctor(doctor_id):
     doctor = Doctor.query.get_or_404(doctor_id)
+    if Admission.query.filter_by(doctor_id=doctor.id, status='Active').count():
+        flash('Discharge or reassign the doctor’s active inpatients before blacklisting this account.', 'warning')
+        return redirect(url_for('admin.admin_doctors'))
     doctor.is_blacklisted = True
     for department in Department.query.filter_by(head_doctor_id=doctor.id).all():
         department.head_doctor_id = None

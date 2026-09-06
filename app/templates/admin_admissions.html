@@ -1,0 +1,29 @@
+{% extends 'layout.html' %}
+{% block title %}Admissions{% endblock %}
+{% block page_title %}Admissions{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="hms-kicker">Inpatient operations</span><h2 class="page-title">Admissions & current inpatients</h2><p class="page-subtitle">Create inpatient stays, track bed allocation, and review discharge history.</p></div></div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-4">
+    <div class="hms-panel h-100">
+      <div class="hms-panel-head"><div><span class="hms-kicker">New inpatient</span><h3>Create admission</h3></div><i class="bi bi-person-plus"></i></div>
+      <form method="POST"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3"><label class="form-label">Patient</label><select name="patient_id" class="form-select" required><option value="">Choose patient</option>{% for p in patients %}<option value="{{ p.id }}">{{ p.name or ('Patient #' ~ p.id) }}</option>{% endfor %}</select></div>
+        <div class="mb-3"><label class="form-label">Admitting doctor</label><select name="doctor_id" class="form-select" required><option value="">Choose doctor</option>{% for d in doctors %}<option value="{{ d.id }}">Dr. {{ d.name or d.id }} · {{ d.department.name if d.department else 'No department' }}</option>{% endfor %}</select></div>
+        <div class="mb-3"><label class="form-label">Available bed</label><select name="bed_id" class="form-select" required><option value="">Choose bed</option>{% for bed in beds %}<option value="{{ bed.id }}">{{ bed.ward.department.code }} · {{ bed.ward.name }} · {{ bed.bed_number }}</option>{% endfor %}</select><div class="form-text">Doctor and bed must belong to the same department.</div></div>
+        <div class="mb-3"><label class="form-label">Admission reason</label><textarea name="reason" class="form-control" required placeholder="Why inpatient care is required"></textarea></div>
+        <div class="mb-3"><label class="form-label">Working diagnosis</label><textarea name="diagnosis" class="form-control" placeholder="Optional clinical diagnosis"></textarea></div>
+        <button class="btn btn-primary w-100" {% if not beds %}disabled{% endif %}><i class="bi bi-hospital me-1"></i>Admit patient</button>
+        {% if not beds %}<div class="form-text mt-2">No available beds are currently published.</div>{% endif %}
+      </form>
+    </div>
+  </div>
+
+  <div class="col-xl-8">
+    <form method="GET" class="hms-filter-panel mb-3"><div class="row g-3 align-items-end"><div class="col-lg-6"><label class="form-label">Search</label><input name="q" class="form-control" value="{{ q }}" placeholder="Patient, doctor, ward, bed, reason..."></div><div class="col-sm-6 col-lg-3"><label class="form-label">Status</label><select name="status" class="form-select"><option value="Active" {% if status=='Active' %}selected{% endif %}>Active</option><option value="Discharged" {% if status=='Discharged' %}selected{% endif %}>Discharged</option><option value="all" {% if status=='all' %}selected{% endif %}>All</option></select></div><div class="col-sm-6 col-lg-3 d-grid"><button class="btn btn-primary">Apply</button></div></div></form>
+    <div class="hms-results-summary"><span><strong>{{ admissions|length }}</strong> admission{{ '' if admissions|length == 1 else 's' }} found</span>{% if q or status != 'Active' %}<a href="{{ url_for('admin.admissions') }}">Clear filters</a>{% endif %}</div>
+    {% if admissions %}<div class="hms-appointment-list">{% for a in admissions %}<article class="hms-appointment-card"><div class="hms-appointment-main"><div class="hms-date-tile"><strong>{{ a.admitted_at.strftime('%d') }}</strong><small>{{ a.admitted_at.strftime('%b') }}</small></div><div><div class="d-flex align-items-center gap-2 flex-wrap"><h3>{{ a.patient.name or ('Patient #' ~ a.patient_id) }}</h3><span class="badge {{ 'bg-success' if a.status == 'Active' else 'bg-secondary' }}">{{ a.status }}</span></div><p>Dr. {{ a.doctor.name or a.doctor_id }} · {{ a.department.name }} · {{ a.ward.name }} / {{ a.bed.bed_number }}</p><span class="hms-note">{{ a.reason|truncate(95) }}</span></div></div><div class="hms-appointment-actions"><a href="{{ url_for('admin.admission_detail', admission_id=a.id) }}" class="btn btn-sm btn-outline-primary">Open admission</a></div></article>{% endfor %}</div>{% else %}<div class="hms-empty"><i class="bi bi-hospital"></i><p>No inpatient admissions match these filters.</p></div>{% endif %}
+  </div>
+</div>
+{% endblock %}

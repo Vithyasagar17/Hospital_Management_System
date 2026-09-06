@@ -91,3 +91,57 @@ This slice adds the inpatient-capacity layer that admissions, transfers, and dis
 ## Next
 
 Phase 6B.2 will add **Admissions, bed allocation, ward/bed transfers, discharge, and inpatient history** on top of this infrastructure.
+
+---
+
+# Phase 6B.2 — Admissions, Transfers & Discharge
+
+This slice turns the ward/bed inventory into a real inpatient workflow.
+
+## Added
+
+- First-class `Admission` model linking patient, admitting doctor, department, ward, bed, and optional source appointment.
+- First-class `BedTransfer` history model that preserves every inpatient move instead of overwriting location history.
+- Admin admission console for creating and searching active/discharged inpatient stays.
+- Doctor inpatient workspace for admitting existing patients under their care.
+- Patient hospital-stay history and current admission view.
+- Automatic bed state transitions:
+  - admission: `Available → Occupied`
+  - transfer: old bed `Occupied → Available`, destination `Available → Occupied`
+  - discharge: current bed `Occupied → Available`
+- Transfer workflow restricted to available beds in the same department.
+- Mandatory discharge summary and retained discharge timestamp/history.
+- Inpatient notifications for admission, bed transfer, and discharge.
+- Audit events for admission, transfer, and discharge.
+- Ward bed board now identifies the patient occupying each bed and links to the active admission.
+- Admin and Doctor dashboards expose current inpatient counts.
+
+## Safety rules
+
+- One active inpatient admission per patient.
+- One active admission per bed.
+- Blacklisted patients/doctors cannot be used for new admissions.
+- Admitting doctor must belong to the same active department as the selected bed.
+- Only active wards/departments and `Available` beds can receive admissions.
+- Doctor admission is restricted to patients with an existing doctor–patient appointment relationship.
+- Doctors can only view, transfer, and discharge admissions assigned to them.
+- Patients can only view their own admission records.
+- Database partial unique indexes protect active patient and active bed allocation from concurrent duplicate requests.
+
+## Database compatibility
+
+`ensure_phase6_schema()` creates `admission` and `bed_transfer` with `checkfirst=True` and adds partial unique indexes for active patient/bed assignment. Existing users, appointments, wards and beds are preserved.
+
+## Recommended demo
+
+1. Admin creates Cardiology → Cardiac Ward → beds `CW-01` and `CW-02`.
+2. Assign a doctor to Cardiology.
+3. Doctor opens an existing patient → **Admit patient** → choose `CW-01`.
+4. Show `CW-01` automatically becoming **Occupied** and the patient appearing on the bed board.
+5. Transfer the admission from `CW-01` to `CW-02` and show transfer history.
+6. Discharge the patient with a summary and show `CW-02` returning to **Available**.
+7. Login as the patient and show the complete hospital-stay record.
+
+## Next
+
+Phase 6C can add **laboratory ordering, sample tracking, results, and result notifications** on top of appointments and inpatient stays.
