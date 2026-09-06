@@ -114,7 +114,7 @@ python -m pytest -q
 - Waitlist queue with temporary released-slot offers and patient claim flow
 - Scheduling intelligence for no-shows, reminders, waitlist conversion and doctor utilization
 
-## Phase 6A hospital departments
+## Phase 6 hospital operations
 
 - First-class department records with code, description, location and active/inactive state
 - Administrator-controlled doctor-to-department assignment
@@ -126,4 +126,15 @@ python -m pytest -q
 - Department context in doctor profiles, booking, and patient-facing doctor profiles
 - Additive schema upgrade; existing Phase 5 data is preserved
 
-See `PHASE6_UPGRADE_NOTES.md` for the Phase 6A demo flow.
+### Phase 6B.1 wards & beds
+
+- Department-linked ward directory with General, ICU, Private, Emergency and custom ward types
+- Ward activation/deactivation and operational location metadata
+- Bed inventory with Available, Reserved, Occupied and Maintenance states
+- Duplicate bed and ward protection plus audit logging
+- Hospital-wide and department-level bed-capacity metrics
+- Admin dashboard occupancy and available-bed visibility
+- Safety rules that reserve `Occupied` state for the upcoming admission workflow
+- Additive schema upgrade with no database reset
+
+See `PHASE6_UPGRADE_NOTES.md` for the Phase 6A and 6B.1 demo flows.

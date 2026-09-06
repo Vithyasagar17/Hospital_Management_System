@@ -109,7 +109,7 @@ def ensure_phase5_schema():
 
 
 def ensure_phase6_schema():
-    """Add Phase 6A department structure without resetting Phase 5 data."""
+    """Add Phase 6 hospital operations structure without resetting Phase 5 data."""
     inspector = inspect(db.engine)
     fresh_database = not inspector.has_table('user')
 
@@ -119,7 +119,7 @@ def ensure_phase6_schema():
 
     ensure_phase5_schema()
 
-    from app.models import Department
+    from app.models import Department, Ward, Bed
     Department.__table__.create(bind=db.engine, checkfirst=True)
     _add_columns('doctor', {
         'department_id': 'INTEGER REFERENCES department(id)',
@@ -127,4 +127,10 @@ def ensure_phase6_schema():
     db.session.execute(text(
         "CREATE INDEX IF NOT EXISTS ix_doctor_department_id ON doctor(department_id)"
     ))
+
+    # Phase 6B.1: inpatient capacity infrastructure. Admissions are added in
+    # the next slice, so existing databases can safely gain wards and beds
+    # without changing appointment or patient data.
+    Ward.__table__.create(bind=db.engine, checkfirst=True)
+    Bed.__table__.create(bind=db.engine, checkfirst=True)
     db.session.commit()

@@ -1,13 +1,17 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
-from sqlalchemy import or_, func
+from sqlalchemy import or_, func, and_
 from app import db
-from app.models import Doctor, Patient, Appointment, Specialization, User, AuditLog, Department
+from app.models import Doctor, Patient, Appointment, Specialization, User, AuditLog, Department, Ward, Bed
 from app.routes.auth_decorator import role_required
 from app.activity import log_activity, notify_user
 from app.security import send_verification_email, validate_password
 from app.analytics import build_scheduling_analytics, normalize_window
 from app.departments import department_rows, department_snapshot
+from app.inpatient import (
+    ADMIN_SETTABLE_BED_STATUSES, WARD_TYPES,
+    department_bed_snapshot, hospital_bed_snapshot, ward_snapshot,
+)
 from datetime import datetime, timedelta
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
@@ -34,6 +38,7 @@ def admin_dashboard():
     total_departments = Department.query.filter_by(is_active=True).count()
     total_patients = Patient.query.filter_by(is_blacklisted=False).count()
     total_appointments = Appointment.query.count()
+    bed_snapshot = hospital_bed_snapshot()
     appointments_today = Appointment.query.filter(
         Appointment.date >= datetime.combine(today, datetime.min.time()),
         Appointment.date < datetime.combine(tomorrow, datetime.min.time())
@@ -65,6 +70,7 @@ def admin_dashboard():
         total_departments=total_departments,
         total_patients=total_patients,
         total_appointments=total_appointments,
+        bed_snapshot=bed_snapshot,
         appointments_today=appointments_today,
         status_counts=status_counts,
         recent_appointments=recent_appointments,
@@ -195,13 +201,14 @@ def department_detail(department_id):
         return redirect(url_for('admin.department_detail', department_id=department.id))
 
     snapshot = department_snapshot(department.id)
+    inpatient_snapshot = department_bed_snapshot(department.id)
     doctors = Doctor.query.filter_by(department_id=department.id).order_by(Doctor.name).all()
     head_candidates = [doctor for doctor in doctors if not doctor.is_blacklisted]
     recent_appointments = Appointment.query.join(Doctor, Appointment.doctor_id == Doctor.id).filter(
         Doctor.department_id == department.id
     ).order_by(Appointment.date.desc()).limit(8).all()
     return render_template(
-        'admin_department_detail.html', department=department, snapshot=snapshot,
+        'admin_department_detail.html', department=department, snapshot=snapshot, inpatient_snapshot=inpatient_snapshot,
         doctors=doctors, head_candidates=head_candidates, recent_appointments=recent_appointments,
     )
 
@@ -213,8 +220,12 @@ def toggle_department(department_id):
     department = Department.query.get_or_404(department_id)
     if department.is_active:
         assigned = Doctor.query.filter_by(department_id=department.id).count()
+        active_wards = Ward.query.filter_by(department_id=department.id, is_active=True).count()
         if assigned:
             flash('Reassign all doctors before deactivating this department.', 'warning')
+            return redirect(url_for('admin.department_detail', department_id=department.id))
+        if active_wards:
+            flash('Deactivate all wards before deactivating this department.', 'warning')
             return redirect(url_for('admin.department_detail', department_id=department.id))
         department.is_active = False
         department.head_doctor_id = None
@@ -228,6 +239,249 @@ def toggle_department(department_id):
     db.session.commit()
     flash(message, 'success')
     return redirect(url_for('admin.departments', status='active' if department.is_active else 'inactive'))
+
+
+@admin_bp.route('/wards', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def wards():
+    departments = Department.query.filter_by(is_active=True).order_by(Department.name).all()
+
+    if request.method == 'POST':
+        department_id = request.form.get('department_id', type=int)
+        name = request.form.get('name', '').strip()
+        code = request.form.get('code', '').strip().upper()
+        ward_type = request.form.get('ward_type', 'General').strip()
+        location = request.form.get('location', '').strip()
+
+        department = Department.query.filter_by(id=department_id, is_active=True).first()
+        if not department or not name or not code:
+            flash('Active department, ward name, and ward code are required.', 'warning')
+            return redirect(url_for('admin.wards'))
+        if ward_type not in WARD_TYPES:
+            flash('Choose a valid ward type.', 'warning')
+            return redirect(url_for('admin.wards'))
+        if len(name) > 120 or len(code) > 30 or len(location) > 120:
+            flash('Ward name, code, or location is too long.', 'warning')
+            return redirect(url_for('admin.wards'))
+
+        duplicate = Ward.query.filter(or_(
+            func.lower(Ward.code) == code.lower(),
+            and_(Ward.department_id == department.id, func.lower(Ward.name) == name.lower()),
+        )).first()
+        if duplicate:
+            flash('That ward code already exists, or this department already has a ward with that name.', 'warning')
+            return redirect(url_for('admin.wards'))
+
+        ward = Ward(
+            department_id=department.id,
+            name=name,
+            code=code,
+            ward_type=ward_type,
+            location=location or None,
+            is_active=True,
+        )
+        db.session.add(ward)
+        db.session.flush()
+        log_activity('ward_created', f'Created ward {name} ({code}) in {department.name}.', 'Ward', ward.id)
+        db.session.commit()
+        flash(f'Ward {name} created.', 'success')
+        return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+    q = request.args.get('q', '').strip()
+    status = request.args.get('status', 'active')
+    department_id = request.args.get('department_id', type=int)
+    query = Ward.query.join(Department, Ward.department_id == Department.id)
+    if status in {'active', 'inactive'}:
+        query = query.filter(Ward.is_active.is_(status == 'active'))
+    if department_id:
+        query = query.filter(Ward.department_id == department_id)
+    if q:
+        query = query.filter(or_(
+            Ward.name.ilike(f'%{q}%'), Ward.code.ilike(f'%{q}%'),
+            Ward.location.ilike(f'%{q}%'), Department.name.ilike(f'%{q}%'),
+        ))
+    rows = [ward_snapshot(ward.id) for ward in query.order_by(Department.name, Ward.name).all()]
+    all_departments = Department.query.order_by(Department.name).all()
+    return render_template(
+        'admin_wards.html', rows=rows, departments=departments, all_departments=all_departments,
+        ward_types=WARD_TYPES, q=q, status=status, department_id=department_id,
+    )
+
+
+@admin_bp.route('/ward/<int:ward_id>', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def ward_detail(ward_id):
+    ward = Ward.query.get_or_404(ward_id)
+    departments = Department.query.order_by(Department.name).all()
+
+    if request.method == 'POST':
+        department_id = request.form.get('department_id', type=int)
+        name = request.form.get('name', '').strip()
+        code = request.form.get('code', '').strip().upper()
+        ward_type = request.form.get('ward_type', 'General').strip()
+        location = request.form.get('location', '').strip()
+        target_department = Department.query.filter_by(id=department_id, is_active=True).first()
+
+        if not target_department or not name or not code:
+            flash('Active department, ward name, and ward code are required.', 'warning')
+            return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+        if ward_type not in WARD_TYPES:
+            flash('Choose a valid ward type.', 'warning')
+            return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+        duplicate = Ward.query.filter(
+            Ward.id != ward.id,
+            or_(
+                func.lower(Ward.code) == code.lower(),
+                and_(Ward.department_id == target_department.id, func.lower(Ward.name) == name.lower()),
+            ),
+        ).first()
+        if duplicate:
+            flash('Another ward already uses that code, or the target department already has that name.', 'warning')
+            return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+        if target_department.id != ward.department_id:
+            protected_beds = Bed.query.filter(
+                Bed.ward_id == ward.id,
+                Bed.status.in_(['Reserved', 'Occupied']),
+            ).count()
+            if protected_beds:
+                flash('A ward with reserved or occupied beds cannot be moved to another department.', 'warning')
+                return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+        old_department_id = ward.department_id
+        ward.department_id = target_department.id
+        ward.name = name
+        ward.code = code
+        ward.ward_type = ward_type
+        ward.location = location or None
+        log_activity(
+            'ward_updated',
+            f'Updated ward {name} ({code}); department {old_department_id} → {ward.department_id}.',
+            'Ward', ward.id,
+        )
+        db.session.commit()
+        flash(f'Ward {name} updated.', 'success')
+        return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+    snapshot = ward_snapshot(ward.id)
+    beds = Bed.query.filter_by(ward_id=ward.id).order_by(Bed.bed_number).all()
+    return render_template(
+        'admin_ward_detail.html', ward=ward, snapshot=snapshot, beds=beds,
+        departments=departments, ward_types=WARD_TYPES,
+        bed_statuses=ADMIN_SETTABLE_BED_STATUSES,
+    )
+
+
+@admin_bp.route('/ward/<int:ward_id>/toggle', methods=['POST'])
+@login_required
+@role_required('Admin')
+def toggle_ward(ward_id):
+    ward = Ward.query.get_or_404(ward_id)
+    if ward.is_active:
+        protected_beds = Bed.query.filter(
+            Bed.ward_id == ward.id,
+            Bed.status.in_(['Reserved', 'Occupied']),
+        ).count()
+        if protected_beds:
+            flash('A ward with reserved or occupied beds cannot be deactivated.', 'warning')
+            return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+        ward.is_active = False
+        action = 'ward_deactivated'
+        message = f'Ward {ward.name} deactivated.'
+    else:
+        if not ward.department or not ward.department.is_active:
+            flash('Reactivate the parent department before reactivating this ward.', 'warning')
+            return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+        ward.is_active = True
+        action = 'ward_reactivated'
+        message = f'Ward {ward.name} reactivated.'
+    log_activity(action, message, 'Ward', ward.id)
+    db.session.commit()
+    flash(message, 'success')
+    return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+
+@admin_bp.route('/ward/<int:ward_id>/beds', methods=['POST'])
+@login_required
+@role_required('Admin')
+def add_bed(ward_id):
+    ward = Ward.query.get_or_404(ward_id)
+    bed_number = request.form.get('bed_number', '').strip().upper()
+    status = request.form.get('status', 'Available').strip()
+    notes = request.form.get('notes', '').strip()
+
+    if not ward.is_active:
+        flash('Reactivate the ward before adding beds.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+    if not bed_number or len(bed_number) > 30:
+        flash('Bed number is required and must be 30 characters or fewer.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+    if status not in ADMIN_SETTABLE_BED_STATUSES:
+        flash('Occupied beds can only be assigned through the admission workflow.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+    duplicate = Bed.query.filter(
+        Bed.ward_id == ward.id,
+        func.lower(Bed.bed_number) == bed_number.lower(),
+    ).first()
+    if duplicate:
+        flash('That bed number already exists in this ward.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+    bed = Bed(ward_id=ward.id, bed_number=bed_number, status=status, notes=notes or None)
+    db.session.add(bed)
+    db.session.flush()
+    log_activity('bed_created', f'Created bed {bed_number} in {ward.name}; status {status}.', 'Bed', bed.id)
+    db.session.commit()
+    flash(f'Bed {bed_number} added to {ward.name}.', 'success')
+    return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+
+@admin_bp.route('/bed/<int:bed_id>/update', methods=['POST'])
+@login_required
+@role_required('Admin')
+def update_bed(bed_id):
+    bed = Bed.query.get_or_404(bed_id)
+    bed_number = request.form.get('bed_number', '').strip().upper()
+    status = request.form.get('status', bed.status).strip()
+    notes = request.form.get('notes', '').strip()
+
+    if not bed_number or len(bed_number) > 30:
+        flash('Bed number is required and must be 30 characters or fewer.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=bed.ward_id))
+    if bed.status == 'Occupied':
+        flash('Occupied beds are controlled by the admission and discharge workflow.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=bed.ward_id))
+    if status not in ADMIN_SETTABLE_BED_STATUSES:
+        flash('Occupied status can only be set by the admission workflow.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=bed.ward_id))
+    if status == 'Reserved' and not bed.ward.is_active:
+        flash('Beds in an inactive ward cannot be reserved.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=bed.ward_id))
+
+    duplicate = Bed.query.filter(
+        Bed.ward_id == bed.ward_id,
+        Bed.id != bed.id,
+        func.lower(Bed.bed_number) == bed_number.lower(),
+    ).first()
+    if duplicate:
+        flash('That bed number already exists in this ward.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=bed.ward_id))
+
+    old_number, old_status = bed.bed_number, bed.status
+    bed.bed_number = bed_number
+    bed.status = status
+    bed.notes = notes or None
+    log_activity(
+        'bed_updated',
+        f'Updated bed {old_number} → {bed_number} in {bed.ward.name}; status {old_status} → {status}.',
+        'Bed', bed.id,
+    )
+    db.session.commit()
+    flash(f'Bed {bed.bed_number} updated.', 'success')
+    return redirect(url_for('admin.ward_detail', ward_id=bed.ward_id))
 
 
 @admin_bp.route('/doctors')

@@ -14,6 +14,13 @@
   <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon warning"><i class="bi bi-calendar2-week"></i></span><div><strong>{{ snapshot.appointments_30d }}</strong><small>Appointments · 30d</small></div></div></div>
 </div>
 
+<div class="row g-3 mb-4">
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon primary"><i class="bi bi-hospital"></i></span><div><strong>{{ inpatient_snapshot.active_wards }}</strong><small>Active wards</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon info"><i class="bi bi-grid-3x3-gap"></i></span><div><strong>{{ inpatient_snapshot.total_beds }}</strong><small>Total beds</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon success"><i class="bi bi-check2-circle"></i></span><div><strong>{{ inpatient_snapshot.available_beds }}</strong><small>Available beds</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon warning"><i class="bi bi-bookmark-check"></i></span><div><strong>{{ inpatient_snapshot.reserved_beds }}</strong><small>Reserved beds</small></div></div></div>
+</div>
+
 <div class="row g-4 mb-4">
   <div class="col-xl-5">
     <div class="hms-panel h-100">
@@ -26,7 +33,7 @@
         <button class="btn btn-primary mt-3"><i class="bi bi-check2 me-1"></i>Save department</button>
       </form>
       <hr class="my-4">
-      <form method="POST" action="{{ url_for('admin.toggle_department', department_id=department.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">{% if department.is_active %}<button class="btn btn-outline-danger" {% if snapshot.doctor_count %}disabled{% endif %} onclick="return confirm('Deactivate this department?')"><i class="bi bi-pause-circle me-1"></i>Deactivate</button>{% if snapshot.doctor_count %}<div class="form-text mt-2">Reassign all doctors before deactivation.</div>{% endif %}{% else %}<button class="btn btn-success"><i class="bi bi-arrow-counterclockwise me-1"></i>Reactivate</button>{% endif %}</form>
+      <form method="POST" action="{{ url_for('admin.toggle_department', department_id=department.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">{% if department.is_active %}<button class="btn btn-outline-danger" {% if snapshot.doctor_count or inpatient_snapshot.active_wards %}disabled{% endif %} onclick="return confirm('Deactivate this department?')"><i class="bi bi-pause-circle me-1"></i>Deactivate</button>{% if snapshot.doctor_count %}<div class="form-text mt-2">Reassign all doctors before deactivation.</div>{% elif inpatient_snapshot.active_wards %}<div class="form-text mt-2">Deactivate all wards before deactivation.</div>{% endif %}{% else %}<button class="btn btn-success"><i class="bi bi-arrow-counterclockwise me-1"></i>Reactivate</button>{% endif %}</form>
     </div>
   </div>
 
@@ -34,6 +41,11 @@
     <div class="hms-panel mb-4">
       <div class="hms-panel-head"><div><span class="hms-kicker">Clinical team</span><h3>Assigned doctors</h3></div><a href="{{ url_for('admin.admin_doctors', department_id=department.id) }}" class="hms-text-link">Open directory <i class="bi bi-arrow-right"></i></a></div>
       {% if doctors %}<div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>Doctor</th><th>Specialization</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>{% for doctor in doctors %}<tr><td><strong>Dr. {{ doctor.name or 'Doctor' }}</strong></td><td>{{ doctor.specialization.name if doctor.specialization else '—' }}</td><td>{% if department.head_doctor_id == doctor.id %}<span class="badge bg-primary">Department head</span>{% else %}Member{% endif %}</td><td><span class="badge {{ 'bg-danger' if doctor.is_blacklisted else 'bg-success' }}">{{ 'Blacklisted' if doctor.is_blacklisted else 'Active' }}</span></td><td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.edit_doctor', doctor_id=doctor.id) }}">Edit</a></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="hms-empty py-3"><i class="bi bi-person-plus"></i><p>No doctors assigned yet. Assign doctors from the Doctor editor.</p></div>{% endif %}
+    </div>
+
+    <div class="hms-panel mb-4">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Inpatient capacity</span><h3>Department wards</h3></div><a href="{{ url_for('admin.wards', department_id=department.id) }}" class="hms-text-link">Manage wards <i class="bi bi-arrow-right"></i></a></div>
+      {% if inpatient_snapshot.wards %}<div class="hms-activity-list">{% for row in inpatient_snapshot.wards %}<div class="hms-activity-item"><span class="hms-activity-icon"><i class="bi bi-hospital"></i></span><div class="flex-grow-1"><strong>{{ row.ward.name }} · {{ row.ward.ward_type }}</strong><small>{{ row.capacity }} beds · {{ row.available }} available · {{ row.reserved }} reserved · {{ row.maintenance }} maintenance</small></div><a href="{{ url_for('admin.ward_detail', ward_id=row.ward.id) }}" class="btn btn-sm btn-outline-primary">Open</a></div>{% endfor %}</div>{% else %}<div class="hms-empty py-3"><i class="bi bi-hospital"></i><p>No wards assigned to this department yet.</p><a href="{{ url_for('admin.wards') }}" class="btn btn-sm btn-outline-primary">Create ward</a></div>{% endif %}
     </div>
 
     <div class="hms-panel">

@@ -47,6 +47,46 @@ class Department(db.Model):
     head_doctor = db.relationship('Doctor', foreign_keys=[head_doctor_id], post_update=True)
 
 
+class Ward(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    department_id = db.Column(db.Integer, db.ForeignKey('department.id'), nullable=False, index=True)
+    name = db.Column(db.String(120), nullable=False)
+    code = db.Column(db.String(30), unique=True, nullable=False)
+    ward_type = db.Column(db.String(30), default='General', nullable=False)
+    location = db.Column(db.String(120), nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+    department = db.relationship(
+        'Department',
+        backref=db.backref('wards', lazy=True),
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint('department_id', 'name', name='uq_ward_department_name'),
+    )
+
+
+class Bed(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    ward_id = db.Column(db.Integer, db.ForeignKey('ward.id'), nullable=False, index=True)
+    bed_number = db.Column(db.String(30), nullable=False)
+    status = db.Column(db.String(20), default='Available', nullable=False, index=True)
+    notes = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+    ward = db.relationship(
+        'Ward',
+        backref=db.backref('beds', lazy=True),
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint('ward_id', 'bed_number', name='uq_bed_ward_number'),
+    )
+
+
 class Doctor(db.Model):
     id = db.Column(db.Integer, db.ForeignKey('user.id'), primary_key=True)
     name = db.Column(db.String(100))

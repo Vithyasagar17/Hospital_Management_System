@@ -44,3 +44,50 @@ Existing doctors remain unassigned until an Admin places them into a department.
 ## Next
 
 Phase 6B should build on this structure with **wards, beds, admissions, transfers, and discharge workflows**.
+
+---
+
+# Phase 6B.1 — Wards & Bed Infrastructure
+
+This slice adds the inpatient-capacity layer that admissions, transfers, and discharge will use in Phase 6B.2.
+
+## Added
+
+- First-class `Ward` model linked to a hospital department.
+- Ward metadata: unique code, type, location, active/inactive state, and department association.
+- Supported ward types: General, ICU, Private, Emergency, and Other.
+- First-class `Bed` model with a ward-scoped unique bed number.
+- Bed states: `Available`, `Reserved`, `Occupied`, and `Maintenance`.
+- Admin ward directory with department/status/search filters and live bed-capacity summaries.
+- Ward operations page for metadata, ward activation/deactivation, bed creation, and bed maintenance.
+- Hospital-wide and department-level bed capacity metrics.
+- Admin dashboard capacity cards for wards, total beds, available beds, reserved beds, and occupancy.
+- Department detail pages now expose inpatient ward capacity.
+- Audit events for ward and bed creation/update/state changes.
+
+## Safety rules
+
+- `Occupied` cannot be assigned manually; Phase 6B.2 admissions will own that state.
+- Duplicate bed numbers inside the same ward are rejected.
+- Duplicate ward codes are rejected hospital-wide.
+- A ward with `Reserved` or `Occupied` beds cannot be deactivated or moved to another department.
+- Beds in inactive wards cannot be newly reserved.
+- Active wards prevent their parent department from being deactivated.
+- No hard deletion is introduced, preserving future inpatient history.
+
+## Database compatibility
+
+`ensure_phase6_schema()` now also creates the `ward` and `bed` tables with `checkfirst=True`. Existing Phase 5/6A data remains unchanged; no database reset is required.
+
+## Recommended demo
+
+1. Admin → Departments → create **Cardiology**.
+2. Admin → Wards & beds → create **Cardiac ICU (CICU)** under Cardiology.
+3. Add beds `CICU-01`, `CICU-02`, and `CICU-03`.
+4. Set one bed to Maintenance and another to Reserved.
+5. Show the live ward capacity summary and Admin dashboard totals.
+6. Attempt to deactivate the ward while a bed is Reserved to demonstrate the safety rule.
+
+## Next
+
+Phase 6B.2 will add **Admissions, bed allocation, ward/bed transfers, discharge, and inpatient history** on top of this infrastructure.
