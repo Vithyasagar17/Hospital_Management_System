@@ -7,6 +7,7 @@ from sqlalchemy import or_
 from app.activity import log_activity, notify_user
 from datetime import datetime, timedelta
 from app.waitlist import offer_released_slot
+from app.analytics import build_scheduling_analytics, normalize_window
 
 
 doctor_bp = Blueprint('doctor', __name__, url_prefix='/doctor')
@@ -55,6 +56,21 @@ def doctor_dashboard():
         today_appointments=today_appointments, pending_count=pending_count,
         confirmed_count=confirmed_count, completed_count=completed_count,
         upcoming=upcoming, chart_labels=chart_labels, chart_values=chart_values
+    )
+
+
+@doctor_bp.route('/scheduling-analytics')
+@login_required
+@role_required('Doctor')
+def scheduling_analytics():
+    days = normalize_window(request.args.get('days', 30))
+    analytics = build_scheduling_analytics(doctor_id=current_user.id, days=days)
+    doctor = Doctor.query.filter_by(id=current_user.id).first()
+    return render_template(
+        'doctor_scheduling_analytics.html',
+        analytics=analytics,
+        days=days,
+        doctor=doctor,
     )
 
 

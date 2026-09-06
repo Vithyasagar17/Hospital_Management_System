@@ -43,6 +43,7 @@
   <div class="col-md-6 col-xl-3"><div class="hms-action-card"><div class="hms-icon"><i class="bi bi-clock-history"></i></div><div><h3>Availability</h3><p>Publish bookable working windows for the next two weeks.</p></div><a href="{{ url_for('doctor.manage_availability') }}" class="btn btn-outline-primary">Set schedule</a></div></div>
   <div class="col-md-6 col-xl-3"><div class="hms-action-card"><div class="hms-icon"><i class="bi bi-people"></i></div><div><h3>Patients</h3><p>Open patient profiles and completed visit history.</p></div><a href="{{ url_for('doctor.doctor_patients') }}" class="btn btn-outline-primary">Patient records</a></div></div>
   <div class="col-md-6 col-xl-3"><div class="hms-action-card"><div class="hms-icon"><i class="bi bi-capsule-pill"></i></div><div><h3>Prescriptions</h3><p>Create prescriptions for confirmed consultations.</p></div><a href="{{ url_for('doctor.prescriptions') }}" class="btn btn-outline-primary">Prescriptions</a></div></div>
+  <div class="col-md-6 col-xl-3"><div class="hms-action-card"><div class="hms-icon"><i class="bi bi-graph-up-arrow"></i></div><div><h3>Scheduling analytics</h3><p>Review attendance, reminders, waitlist conversion and capacity utilization.</p></div><a href="{{ url_for('doctor.scheduling_analytics') }}" class="btn btn-outline-primary">View analytics</a></div></div>
 </div>
 {% endblock %}
 {% block scripts %}

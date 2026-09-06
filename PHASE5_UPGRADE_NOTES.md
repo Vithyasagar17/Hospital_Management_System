@@ -69,3 +69,15 @@ python -m flask --app run process-waitlist-offers
 ```
 
 - Added Phase 5C regression tests for fully-booked dates, released-slot offers, temporary holds, claiming, duplicate prevention, and expiry promotion.
+
+## Phase 5D — Scheduling intelligence
+- Added read-only scheduling analytics for Admin and Doctor portals with 7/30/90/365-day windows.
+- Tracks completion, no-show, cancellation, and reschedule rates from appointment outcomes.
+- Measures patient reminder delivery coverage for the appointment's current schedule snapshot.
+- Compares observed no-show rates for resolved visits with and without a current-schedule reminder; the UI explicitly treats this as association, not causation.
+- Tracks 24-hour vs 2-hour reminder delivery counts and successful email reminder deliveries.
+- Adds waitlist volume, status mix, and waitlist-to-booking conversion rate.
+- Identifies busiest weekday and hour from non-cancelled scheduled workload.
+- Estimates published-slot utilization from doctor availability windows after subtracting blocked windows.
+- Adds per-doctor comparison for Admin and a dedicated personal analytics dashboard for Doctors.
+- No database migration is required; Phase 5D derives metrics from existing appointment, reminder, availability, and waitlist records.

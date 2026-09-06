@@ -1,0 +1,78 @@
+{% extends 'layout.html' %}
+{% block title %}Scheduling analytics{% endblock %}
+{% block page_title %}Scheduling analytics{% endblock %}
+{% block content %}
+<div class="page-header align-items-end">
+  <div>
+    <span class="hms-kicker">Phase 5D · Scheduling intelligence</span>
+    <h2 class="page-title">Hospital scheduling performance</h2>
+    <p class="page-subtitle">Measure attendance, rescheduling, reminder coverage, waitlist conversion and published-slot utilization.</p>
+  </div>
+  <form method="GET" class="d-flex gap-2 align-items-end">
+    <div><label class="form-label">Period</label><select name="days" class="form-select" onchange="this.form.submit()">{% for option in [7,30,90,365] %}<option value="{{ option }}" {% if days == option %}selected{% endif %}>Last {{ option }} days</option>{% endfor %}</select></div>
+  </form>
+</div>
+
+<div class="alert alert-light border mb-4"><i class="bi bi-info-circle me-2"></i>Metrics use appointment schedule dates from <strong>{{ analytics.start_date.strftime('%d %b %Y') }}</strong> to <strong>{{ analytics.end_date.strftime('%d %b %Y') }}</strong>. Reminder outcome comparison is observational and does not prove that reminders caused attendance.</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon primary"><i class="bi bi-calendar2-week"></i></span><div><strong>{{ analytics.total_appointments }}</strong><small>Appointments</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon success"><i class="bi bi-check2-circle"></i></span><div><strong>{{ analytics.completion_rate }}%</strong><small>Completion rate*</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon warning"><i class="bi bi-person-x"></i></span><div><strong>{{ analytics.no_show_rate }}%</strong><small>No-show rate*</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon info"><i class="bi bi-arrow-repeat"></i></span><div><strong>{{ analytics.reschedule_rate }}%</strong><small>Rescheduled visits</small></div></div></div>
+</div>
+<p class="text-muted small mt-n2 mb-4">*Completion and no-show rates use resolved visits (Completed + No Show) as the denominator.</p>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-8"><div class="hms-panel h-100"><div class="hms-panel-head"><div><span class="hms-kicker">Demand trend</span><h3>Scheduled workload</h3></div><i class="bi bi-graph-up"></i></div><div class="hms-chart-wrap"><canvas id="schedulingVolumeChart"></canvas></div></div></div>
+  <div class="col-xl-4"><div class="hms-panel h-100"><div class="hms-panel-head"><div><span class="hms-kicker">Workflow mix</span><h3>Appointment status</h3></div><i class="bi bi-pie-chart"></i></div><div class="hms-chart-wrap hms-chart-small"><canvas id="schedulingStatusChart"></canvas></div></div></div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-6">
+    <div class="hms-panel h-100">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Reminder operations</span><h3>Attendance after reminders</h3></div><i class="bi bi-bell"></i></div>
+      <div class="row g-3 mb-3">
+        <div class="col-6"><div class="hms-clinical-block"><span>Patient reminder deliveries</span><p class="mb-0"><strong>{{ analytics.patient_reminder_deliveries }}</strong> · {{ analytics.reminder_24h_count }} at 24h / {{ analytics.reminder_2h_count }} at 2h</p></div></div>
+        <div class="col-6"><div class="hms-clinical-block"><span>Resolved visits reminded</span><p class="mb-0"><strong>{{ analytics.reminder_outcome_coverage }}%</strong> coverage</p></div></div>
+      </div>
+      <div class="hms-chart-wrap hms-chart-small"><canvas id="reminderOutcomeChart"></canvas></div>
+      <p class="text-muted small mb-0">No-show rate among resolved visits: {{ analytics.reminded_no_show_rate }}% with a current-schedule patient reminder vs {{ analytics.unreminded_no_show_rate }}% without one.</p>
+    </div>
+  </div>
+  <div class="col-xl-6">
+    <div class="hms-panel h-100">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Capacity recovery</span><h3>Waitlist performance</h3></div><i class="bi bi-hourglass-split"></i></div>
+      <div class="row g-3 mb-3">
+        <div class="col-6"><div class="hms-clinical-block"><span>Waitlist entries</span><p class="mb-0"><strong>{{ analytics.waitlist_total }}</strong></p></div></div>
+        <div class="col-6"><div class="hms-clinical-block"><span>Converted to booking</span><p class="mb-0"><strong>{{ analytics.waitlist_conversion_rate }}%</strong> · {{ analytics.waitlist_booked }} booked</p></div></div>
+      </div>
+      <div class="hms-status-stack">
+        {% for label in ['Waiting','Offered','Booked','Expired','Cancelled'] %}<div class="hms-status-row"><span><i class="hms-status-dot {% if label == 'Booked' %}success{% elif label == 'Offered' %}warning{% elif label in ['Expired','Cancelled'] %}danger{% else %}primary{% endif %}"></i>{{ label }}</span><strong>{{ analytics.waitlist_status_counts[label] }}</strong></div>{% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-md-6"><div class="hms-panel h-100"><div class="hms-panel-head"><div><span class="hms-kicker">Demand pattern</span><h3>Busiest weekday</h3></div><i class="bi bi-calendar3"></i></div><div class="display-6 fw-bold">{{ analytics.busiest_weekday }}</div><p class="text-muted mb-0">Based on non-cancelled scheduled visits in the selected period.</p></div></div>
+  <div class="col-md-6"><div class="hms-panel h-100"><div class="hms-panel-head"><div><span class="hms-kicker">Demand pattern</span><h3>Busiest hour</h3></div><i class="bi bi-clock"></i></div><div class="display-6 fw-bold">{{ analytics.busiest_hour }}</div><p class="text-muted mb-0">Useful for staffing and availability planning.</p></div></div>
+</div>
+
+<div class="hms-panel">
+  <div class="hms-panel-head"><div><span class="hms-kicker">Doctor comparison</span><h3>Published-slot utilization</h3></div><i class="bi bi-bar-chart-line"></i></div>
+  {% if analytics.doctor_rows %}
+  <div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>Doctor</th><th>Appointments</th><th>Completed</th><th>No-show rate</th><th>Published slots</th><th>Used slots</th><th>Utilization</th></tr></thead><tbody>
+    {% for row in analytics.doctor_rows %}<tr><td><strong>Dr. {{ row.name }}</strong></td><td>{{ row.appointments }}</td><td>{{ row.completed }}</td><td>{{ row.no_show_rate }}%</td><td>{{ row.published_slots }}</td><td>{{ row.used_slots }}</td><td><strong>{{ row.utilization_rate }}%</strong></td></tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<div class="hms-empty"><i class="bi bi-bar-chart"></i>No doctor scheduling activity in this period.</div>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+new Chart(document.getElementById('schedulingVolumeChart'), {type:'line',data:{labels:{{ analytics.daily_labels|tojson }},datasets:[{label:'Appointments',data:{{ analytics.daily_values|tojson }},tension:.3,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}},x:{grid:{display:false}}}}});
+new Chart(document.getElementById('schedulingStatusChart'), {type:'doughnut',data:{labels:{{ analytics.status_labels|tojson }},datasets:[{data:{{ analytics.status_values|tojson }},borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,cutout:'68%',plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:8}}}}});
+new Chart(document.getElementById('reminderOutcomeChart'), {type:'bar',data:{labels:['Reminded','Not reminded'],datasets:[{label:'No-show rate (%)',data:[{{ analytics.reminded_no_show_rate }},{{ analytics.unreminded_no_show_rate }}],borderRadius:8}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:100},x:{grid:{display:false}}}}});
+</script>
+{% endblock %}
