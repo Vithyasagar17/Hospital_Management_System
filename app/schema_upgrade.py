@@ -79,16 +79,29 @@ def ensure_phase4_schema():
 
 
 def ensure_phase5_schema():
-    """Add scheduling metadata without resetting an existing Phase 4 database."""
+    """Add Phase 5 scheduling, reminder, and waitlist data safely."""
     inspector = inspect(db.engine)
-    if not inspector.has_table('user'):
-        db.create_all()
-        return
+    fresh_database = not inspector.has_table('user')
 
-    ensure_phase4_schema()
-    _add_columns('appointment', {
-        'reschedule_count': 'INTEGER NOT NULL DEFAULT 0',
-        'last_rescheduled_at': 'DATETIME',
-        'no_show_at': 'DATETIME',
-    })
+    if fresh_database:
+        db.create_all()
+    else:
+        ensure_phase4_schema()
+        _add_columns('appointment', {
+            'reschedule_count': 'INTEGER NOT NULL DEFAULT 0',
+            'last_rescheduled_at': 'DATETIME',
+            'no_show_at': 'DATETIME',
+        })
+
+    from app.models import AppointmentReminder, WaitlistEntry
+    AppointmentReminder.__table__.create(bind=db.engine, checkfirst=True)
+    WaitlistEntry.__table__.create(bind=db.engine, checkfirst=True)
+
+    # One live queue entry per patient/doctor/date. Closed historical rows do
+    # not block the patient from joining that date again later.
+    db.session.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_waitlist_active_unique "
+        "ON waitlist_entry(patient_id, doctor_id, target_date) "
+        "WHERE status IN ('Waiting', 'Offered')"
+    ))
     db.session.commit()

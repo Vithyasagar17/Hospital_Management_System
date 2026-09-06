@@ -24,3 +24,60 @@ This slice establishes the scheduling rules that reminders and waitlists will bu
 - Automated appointment reminders.
 - Waitlist and released-slot notifications.
 - No-show analytics and reminder effectiveness metrics.
+
+## Phase 5B — Appointment reminders
+- Added idempotent 24-hour and 2-hour reminder processing for confirmed appointments.
+- Reminder windows are mutually exclusive so a late first run does not stack both reminders at once.
+- Added `appointment_reminder` delivery ledger with a unique key across appointment, recipient, reminder type, and schedule snapshot.
+- Rescheduled appointments can receive fresh reminders for the new schedule without deleting historical deliveries.
+- Patient reminders are enabled by default; doctor reminders are optional from the CLI.
+- In-app notifications are the default delivery channel.
+- Optional email delivery reuses the existing console/SMTP mail transport; console mode remains simulated.
+- Appointment detail shows which reminders have been sent for the current schedule.
+- Added a manual CLI command suitable for local testing and future scheduler/worker integration.
+
+### Run reminders manually
+```powershell
+python -m flask --app run send-appointment-reminders
+```
+
+Include doctors as recipients:
+```powershell
+python -m flask --app run send-appointment-reminders --include-doctors
+```
+
+Also attempt email delivery (console mode prints the email; SMTP mode sends it):
+```powershell
+python -m flask --app run send-appointment-reminders --email
+```
+
+## Phase 5C — Waitlist and released-slot promotion
+- Patients can join a doctor's waitlist for a published date only when all bookable slots are occupied.
+- Active duplicate waitlist entries are prevented at both application and SQLite index levels.
+- Patient and doctor workspaces now include dedicated waitlist views.
+- Cancelling or rescheduling an appointment immediately offers the released slot to the oldest eligible waiting patient.
+- Doctor-side cancellation also triggers the same released-slot workflow.
+- Offers last 15 minutes and create in-app notifications with a direct claim link.
+- Offered slots are temporarily reserved and disappear from normal booking choices during the claim window.
+- Patients explicitly claim offers; successful claims create a new `Pending` appointment for doctor confirmation.
+- Declined/expired offers can promote the same slot to the next waiting patient.
+- Waitlist history records Waiting, Offered, Booked, Cancelled, and Expired states.
+- Added CLI maintenance for expired offers:
+
+```powershell
+python -m flask --app run process-waitlist-offers
+```
+
+- Added Phase 5C regression tests for fully-booked dates, released-slot offers, temporary holds, claiming, duplicate prevention, and expiry promotion.
+
+## Phase 5D — Scheduling intelligence
+- Added read-only scheduling analytics for Admin and Doctor portals with 7/30/90/365-day windows.
+- Tracks completion, no-show, cancellation, and reschedule rates from appointment outcomes.
+- Measures patient reminder delivery coverage for the appointment's current schedule snapshot.
+- Compares observed no-show rates for resolved visits with and without a current-schedule reminder; the UI explicitly treats this as association, not causation.
+- Tracks 24-hour vs 2-hour reminder delivery counts and successful email reminder deliveries.
+- Adds waitlist volume, status mix, and waitlist-to-booking conversion rate.
+- Identifies busiest weekday and hour from non-cancelled scheduled workload.
+- Estimates published-slot utilization from doctor availability windows after subtracting blocked windows.
+- Adds per-doctor comparison for Admin and a dedicated personal analytics dashboard for Doctors.
+- No database migration is required; Phase 5D derives metrics from existing appointment, reminder, availability, and waitlist records.

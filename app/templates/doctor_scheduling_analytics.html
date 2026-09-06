@@ -1,0 +1,44 @@
+{% extends 'layout.html' %}
+{% block title %}My scheduling analytics{% endblock %}
+{% block page_title %}Scheduling analytics{% endblock %}
+{% block content %}
+<div class="page-header align-items-end">
+  <div><span class="hms-kicker">Phase 5D · Practice intelligence</span><h2 class="page-title">My scheduling performance</h2><p class="page-subtitle">Track attendance, reminders, waitlist recovery, rescheduling and utilization for your own schedule.</p></div>
+  <form method="GET"><label class="form-label">Period</label><select name="days" class="form-select" onchange="this.form.submit()">{% for option in [7,30,90,365] %}<option value="{{ option }}" {% if days == option %}selected{% endif %}>Last {{ option }} days</option>{% endfor %}</select></form>
+</div>
+
+<div class="alert alert-light border mb-4"><i class="bi bi-info-circle me-2"></i>Showing {{ analytics.start_date.strftime('%d %b %Y') }} – {{ analytics.end_date.strftime('%d %b %Y') }}. Reminder comparisons are descriptive associations, not causal medical or operational conclusions.</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon primary"><i class="bi bi-calendar2-week"></i></span><div><strong>{{ analytics.total_appointments }}</strong><small>Appointments</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon success"><i class="bi bi-check2-circle"></i></span><div><strong>{{ analytics.completion_rate }}%</strong><small>Completion rate</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon warning"><i class="bi bi-person-x"></i></span><div><strong>{{ analytics.no_show_rate }}%</strong><small>No-show rate</small></div></div></div>
+  <div class="col-6 col-xl-3"><div class="hms-metric-card"><span class="hms-metric-icon info"><i class="bi bi-speedometer2"></i></span><div><strong>{{ analytics.utilization.utilization_rate }}%</strong><small>Slot utilization</small></div></div></div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-8"><div class="hms-panel h-100"><div class="hms-panel-head"><div><span class="hms-kicker">Workload trend</span><h3>Appointments by day</h3></div><i class="bi bi-graph-up"></i></div><div class="hms-chart-wrap"><canvas id="doctorAnalyticsVolume"></canvas></div></div></div>
+  <div class="col-xl-4"><div class="hms-panel h-100"><div class="hms-panel-head"><div><span class="hms-kicker">Published capacity</span><h3>Utilization</h3></div><i class="bi bi-clock-history"></i></div><div class="hms-status-stack"><div class="hms-status-row"><span>Published slots</span><strong>{{ analytics.utilization.published_slots }}</strong></div><div class="hms-status-row"><span>Used slots</span><strong>{{ analytics.utilization.used_slots }}</strong></div><div class="hms-status-row"><span>Utilization</span><strong>{{ analytics.utilization.utilization_rate }}%</strong></div></div>{% if analytics.utilization.outside_published_capacity %}<div class="alert alert-warning mt-3 mb-0">{{ analytics.utilization.outside_published_capacity }} appointment slot(s) were outside currently stored published availability, usually because availability was later edited or removed.</div>{% endif %}</div></div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-4"><div class="hms-panel h-100"><div class="hms-panel-head"><div><span class="hms-kicker">Scheduling changes</span><h3>Rescheduling</h3></div><i class="bi bi-arrow-repeat"></i></div><div class="display-6 fw-bold">{{ analytics.reschedule_rate }}%</div><p>{{ analytics.rescheduled_appointments }} appointments were rescheduled. Average changes among rescheduled appointments: <strong>{{ analytics.average_reschedules_when_rescheduled }}</strong>.</p></div></div>
+  <div class="col-xl-4"><div class="hms-panel h-100"><div class="hms-panel-head"><div><span class="hms-kicker">Patient reminders</span><h3>Coverage</h3></div><i class="bi bi-bell"></i></div><div class="display-6 fw-bold">{{ analytics.reminder_outcome_coverage }}%</div><p>{{ analytics.patient_reminder_deliveries }} current-schedule reminder deliveries: {{ analytics.reminder_24h_count }} at 24h and {{ analytics.reminder_2h_count }} at 2h.</p></div></div>
+  <div class="col-xl-4"><div class="hms-panel h-100"><div class="hms-panel-head"><div><span class="hms-kicker">Waitlist recovery</span><h3>Conversion</h3></div><i class="bi bi-hourglass-split"></i></div><div class="display-6 fw-bold">{{ analytics.waitlist_conversion_rate }}%</div><p>{{ analytics.waitlist_booked }} of {{ analytics.waitlist_total }} waitlist entries converted to bookings in the selected date window.</p></div></div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-6"><div class="hms-panel h-100"><div class="hms-panel-head"><div><span class="hms-kicker">Reminder outcome comparison</span><h3>No-show rate</h3></div><i class="bi bi-bell"></i></div><div class="hms-chart-wrap hms-chart-small"><canvas id="doctorReminderOutcome"></canvas></div><p class="text-muted small mb-0">Observed no-show rates among resolved visits only.</p></div></div>
+  <div class="col-xl-6"><div class="hms-panel h-100"><div class="hms-panel-head"><div><span class="hms-kicker">Demand pattern</span><h3>When patients book</h3></div><i class="bi bi-calendar3"></i></div><div class="row g-3"><div class="col-6"><div class="hms-clinical-block"><span>Busiest weekday</span><p class="mb-0"><strong>{{ analytics.busiest_weekday }}</strong></p></div></div><div class="col-6"><div class="hms-clinical-block"><span>Busiest hour</span><p class="mb-0"><strong>{{ analytics.busiest_hour }}</strong></p></div></div></div><div class="hms-chart-wrap hms-chart-small mt-3"><canvas id="doctorWeekdayChart"></canvas></div></div></div>
+</div>
+
+<div class="hms-panel"><div class="hms-panel-head"><div><span class="hms-kicker">Workflow breakdown</span><h3>Appointment status</h3></div><i class="bi bi-pie-chart"></i></div><div class="row g-3">{% for label in analytics.status_labels %}<div class="col-6 col-md"><div class="hms-clinical-block"><span>{{ label }}</span><p class="mb-0"><strong>{{ analytics.status_counts[label] }}</strong></p></div></div>{% endfor %}</div></div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+new Chart(document.getElementById('doctorAnalyticsVolume'), {type:'line',data:{labels:{{ analytics.daily_labels|tojson }},datasets:[{label:'Appointments',data:{{ analytics.daily_values|tojson }},tension:.3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}},x:{grid:{display:false}}}}});
+new Chart(document.getElementById('doctorReminderOutcome'), {type:'bar',data:{labels:['Reminded','Not reminded'],datasets:[{label:'No-show rate (%)',data:[{{ analytics.reminded_no_show_rate }},{{ analytics.unreminded_no_show_rate }}],borderRadius:8}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:100},x:{grid:{display:false}}}}});
+new Chart(document.getElementById('doctorWeekdayChart'), {type:'bar',data:{labels:{{ analytics.weekday_labels|tojson }},datasets:[{label:'Appointments',data:{{ analytics.weekday_values|tojson }},borderRadius:8}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}},x:{grid:{display:false}}}}});
+</script>
+{% endblock %}

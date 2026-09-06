@@ -6,6 +6,7 @@ from app.models import Doctor, Patient, Appointment, Specialization, User, Audit
 from app.routes.auth_decorator import role_required
 from app.activity import log_activity, notify_user
 from app.security import send_verification_email, validate_password
+from app.analytics import build_scheduling_analytics, normalize_window
 from datetime import datetime, timedelta
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
@@ -69,6 +70,15 @@ def admin_dashboard():
         chart_labels=chart_labels,
         chart_values=chart_values,
     )
+
+
+@admin_bp.route('/scheduling-analytics')
+@login_required
+@role_required('Admin')
+def scheduling_analytics():
+    days = normalize_window(request.args.get('days', 30))
+    analytics = build_scheduling_analytics(days=days)
+    return render_template('admin_scheduling_analytics.html', analytics=analytics, days=days)
 
 
 @admin_bp.route('/overview')

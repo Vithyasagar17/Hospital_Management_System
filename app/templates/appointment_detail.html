@@ -22,6 +22,7 @@
         <div><span>Status</span><strong>{{ appointment.status }}</strong></div>
       </div>
       {% if appointment.reschedule_count %}<div class="alert alert-info mt-3 mb-0"><i class="bi bi-calendar2-event me-1"></i>Rescheduled {{ appointment.reschedule_count }} time{{ '' if appointment.reschedule_count == 1 else 's' }}. The latest change returned this visit to the confirmation queue.</div>{% endif %}
+      {% if current_reminders %}<div class="alert alert-light border mt-3 mb-0"><div class="d-flex align-items-center gap-2 flex-wrap"><i class="bi bi-bell-fill text-primary"></i><strong class="me-1">Reminders sent for this schedule</strong>{% for r in current_reminders %}<span class="badge bg-info">{{ '2-hour' if r.reminder_type == '2h' else '24-hour' }} · {{ r.sent_at|local_datetime('%d %b · %I:%M %p') }}</span>{% endfor %}</div></div>{% endif %}
       <div class="hms-clinical-block mt-4"><span>Reason / symptoms</span><p>{{ appointment.reason }}</p></div>
       <div class="hms-clinical-block"><span>Consultation notes</span><p>{{ appointment.notes or 'No consultation notes recorded yet.' }}</p></div>
     </section>

@@ -1,11 +1,13 @@
 from flask import Blueprint, render_template, abort, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 from app.routes.auth_decorator import role_required
-from app.models import Doctor, Patient, Appointment, Prescription, PrescriptionItem, DoctorAvailability
+from app.models import Doctor, Patient, Appointment, Prescription, PrescriptionItem, DoctorAvailability, AppointmentReminder, WaitlistEntry
 from app import db
 from sqlalchemy import or_
 from app.activity import log_activity, notify_user
 from datetime import datetime, timedelta
+from app.waitlist import offer_released_slot
+from app.analytics import build_scheduling_analytics, normalize_window
 
 
 doctor_bp = Blueprint('doctor', __name__, url_prefix='/doctor')
@@ -54,6 +56,21 @@ def doctor_dashboard():
         today_appointments=today_appointments, pending_count=pending_count,
         confirmed_count=confirmed_count, completed_count=completed_count,
         upcoming=upcoming, chart_labels=chart_labels, chart_values=chart_values
+    )
+
+
+@doctor_bp.route('/scheduling-analytics')
+@login_required
+@role_required('Doctor')
+def scheduling_analytics():
+    days = normalize_window(request.args.get('days', 30))
+    analytics = build_scheduling_analytics(doctor_id=current_user.id, days=days)
+    doctor = Doctor.query.filter_by(id=current_user.id).first()
+    return render_template(
+        'doctor_scheduling_analytics.html',
+        analytics=analytics,
+        days=days,
+        doctor=doctor,
     )
 
 
@@ -142,9 +159,14 @@ def appointment_detail(appointment_id):
     if appointment.doctor_id != current_user.id:
         abort(403)
     prescription = appointment.active_prescription
+    current_reminders = AppointmentReminder.query.filter_by(
+        appointment_id=appointment.id,
+        user_id=current_user.id,
+        scheduled_for=appointment.date,
+    ).order_by(AppointmentReminder.sent_at.asc()).all()
     return render_template(
         'appointment_detail.html', appointment=appointment, prescription=prescription,
-        viewer_role='Doctor', now=datetime.now()
+        viewer_role='Doctor', now=datetime.now(), current_reminders=current_reminders
     )
 
 
@@ -333,6 +355,17 @@ def delete_prescription(prescription_id):
     flash('Prescription archived. The clinical audit trail was preserved.', 'success')
     return redirect(url_for('doctor.prescriptions'))
 
+@doctor_bp.route('/waitlist')
+@login_required
+@role_required('Doctor')
+def waitlist():
+    entries = WaitlistEntry.query.filter(
+        WaitlistEntry.doctor_id == current_user.id,
+        WaitlistEntry.status.in_(['Waiting', 'Offered']),
+    ).order_by(WaitlistEntry.target_date.asc(), WaitlistEntry.created_at.asc()).all()
+    return render_template('doctor_waitlist.html', entries=entries, now_utc=datetime.utcnow())
+
+
 @doctor_bp.route('/appointment/<int:appointment_id>/update', methods=['POST'])
 @login_required
 @role_required('Doctor')
@@ -372,6 +405,8 @@ def update_appointment_status(appointment_id):
     doctor_name = appointment.doctor.name if appointment.doctor else current_user.username
     log_activity('appointment_status_changed', f'Appointment #{appointment.id}: {previous_status} → {status}.', 'Appointment', appointment.id)
     notify_user(appointment.patient_id, f'Appointment {status.lower()}', f'Dr. {doctor_name} marked your appointment on {appointment.date.strftime("%d %b %Y at %I:%M %p")} as {status.lower()}.', 'success' if status in ['Confirmed', 'Completed'] else 'warning', f'/patient/appointment/{appointment.id}')
+    if status == 'Cancelled':
+        offer_released_slot(appointment.doctor_id, appointment.date)
     db.session.commit()
 
     flash(f'Appointment marked as {status.lower()}.', 'success')

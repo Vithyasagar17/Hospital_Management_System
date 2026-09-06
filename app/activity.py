@@ -10,7 +10,11 @@ from app.models import AuditLog, Notification, User
 
 
 def log_activity(action, description, entity_type=None, entity_id=None, actor=None):
-    actor = actor or (current_user if getattr(current_user, 'is_authenticated', False) else None)
+    if actor is None:
+        try:
+            actor = current_user if getattr(current_user, 'is_authenticated', False) else None
+        except RuntimeError:
+            actor = None
     username = getattr(actor, 'username', None) or 'system'
     role = getattr(actor, 'role', None) or 'System'
     user_id = getattr(actor, 'id', None)
