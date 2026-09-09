@@ -125,6 +125,7 @@ def create_lab_order(*, patient_id, doctor_id, test_ids, priority='Routine', cli
             test_name_snapshot=test.name,
             unit_snapshot=test.default_unit,
             reference_range_snapshot=test.reference_range,
+            price_snapshot=test.base_price,
         ))
     db.session.flush()
     return order

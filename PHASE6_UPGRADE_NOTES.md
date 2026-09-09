@@ -200,3 +200,59 @@ This slice adds a structured diagnostics workflow across outpatient and inpatien
 ## Next
 
 Phase 6D can build **Billing & Invoicing** using appointment charges, inpatient stay charges, and the `LabTest.base_price` values introduced here.
+
+---
+
+# Phase 6D — Billing & Invoicing
+
+This slice converts completed clinical work into auditable financial records without coupling payment state back into the clinical workflow.
+
+## Added
+
+- Doctor consultation fee and Ward daily-rate configuration.
+- Historical billing snapshots for laboratory prices and inpatient ward rates.
+- Reusable Admin billing service catalog for procedures, supplies, and other manual charges.
+- Draft `Invoice` records with source links to completed appointments or discharged admissions.
+- Automatic charge import for:
+  - consultation fees from completed appointments,
+  - completed laboratory test items using stored price snapshots,
+  - inpatient room/bed charges from discharged admissions.
+- Editable draft invoice items, quantity, discounts, due date, and notes.
+- Invoice lifecycle: `Draft → Issued → Partially Paid → Paid`, plus controlled `Void` state.
+- Payment ledger with Cash, Card, UPI, Bank Transfer, Insurance, and Other methods.
+- Overpayment prevention and immutable issued charge lines.
+- Patient billing portal with outstanding balance and invoice/payment history.
+- Printable invoice view using a dedicated print layout.
+- Admin billing dashboard with outstanding receivables, 30-day collections, issued value, unpaid invoices, and drafts.
+- Patient notifications when invoices are issued, payments are recorded, or an issued invoice is voided.
+- Billing audit events for service-catalog changes, invoice changes, issue, payment, and void operations.
+
+## Data-integrity rules
+
+- Only completed appointments can generate consultation invoices.
+- Only discharged admissions can generate final inpatient room charges.
+- The same consultation, lab result item, or inpatient stay cannot be billed twice on active invoices.
+- Invoice prices are snapshots: later changes to doctor fees, lab catalog prices, ward rates, or service catalog prices do not rewrite existing invoice items.
+- Laboratory orders now snapshot `LabTest.base_price` at order time.
+- New admissions and transfers snapshot ward rates for later inpatient billing.
+- Draft charges can be edited; issued invoice charge lines cannot.
+- Payments cannot exceed the current outstanding balance.
+- Invoices with recorded payments cannot be voided.
+- Patients can only access their own non-draft invoices.
+
+## Database compatibility
+
+`ensure_phase6_schema()` additively creates `billing_service`, `invoice`, `invoice_item`, and `payment`, and adds nullable billing-rate snapshot columns to Doctor, Ward, Admission, BedTransfer, and LabOrderItem. Existing clinical data is preserved and no database reset is required.
+
+## Recommended demo
+
+1. Admin sets Dr. Test consultation fee to ₹600.
+2. Admin sets Cardiac Ward daily rate to ₹2,000 and creates CBC with a ₹250 laboratory base price.
+3. Complete an appointment and linked CBC result.
+4. Admin → Billing → New invoice → choose the completed appointment.
+5. Show the draft automatically containing Consultation ₹600 + CBC ₹250.
+6. Add an ECG service from the charge catalog, apply an optional discount, and issue the invoice.
+7. Login as the patient and show the issued invoice plus printable view.
+8. Admin records a partial UPI payment; show `Issued → Partially Paid` and reduced balance.
+9. Record the remaining payment; show `Partially Paid → Paid` and the full payment ledger.
+10. Generate a discharged-admission invoice to demonstrate automatic ward/day charging.

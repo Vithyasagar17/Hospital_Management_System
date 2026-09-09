@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 from sqlalchemy import or_, func, and_
 from app import db
-from app.models import Doctor, Patient, Appointment, Specialization, User, AuditLog, Department, Ward, Bed, Admission, LabTest, LabOrder, LabOrderItem
+from app.models import Doctor, Patient, Appointment, Specialization, User, AuditLog, Department, Ward, Bed, Admission, LabTest, LabOrder, LabOrderItem, BillingService, Invoice, InvoiceItem, Payment
 from app.routes.auth_decorator import role_required
 from app.activity import log_activity, notify_user
 from app.security import send_verification_email, validate_password
@@ -16,6 +16,11 @@ from app.inpatient import (
 from app.laboratory import (
     LAB_INTERPRETATIONS, LAB_ORDER_STATUSES, LAB_PRIORITIES,
     complete_lab_order, lab_order_summary, parse_price, transition_lab_order,
+)
+from app.billing import (
+    INVOICE_STATUSES, PAYMENT_METHODS, add_invoice_item, add_service_to_invoice,
+    billing_summary, create_invoice, issue_invoice, parse_nonnegative_money,
+    record_payment, refresh_invoice_totals, save_invoice_draft, void_invoice,
 )
 from datetime import datetime, timedelta
 from sqlalchemy.exc import IntegrityError
@@ -47,6 +52,7 @@ def admin_dashboard():
     bed_snapshot = hospital_bed_snapshot()
     active_inpatients = Admission.query.filter_by(status='Active').count()
     open_lab_orders = LabOrder.query.filter(LabOrder.status.in_(['Ordered', 'Sample Collected', 'Processing'])).count()
+    billing_snapshot = billing_summary(days=30)
     appointments_today = Appointment.query.filter(
         Appointment.date >= datetime.combine(today, datetime.min.time()),
         Appointment.date < datetime.combine(tomorrow, datetime.min.time())
@@ -81,6 +87,7 @@ def admin_dashboard():
         bed_snapshot=bed_snapshot,
         active_inpatients=active_inpatients,
         open_lab_orders=open_lab_orders,
+        billing_snapshot=billing_snapshot,
         appointments_today=appointments_today,
         status_counts=status_counts,
         recent_appointments=recent_appointments,
@@ -263,6 +270,11 @@ def wards():
         code = request.form.get('code', '').strip().upper()
         ward_type = request.form.get('ward_type', 'General').strip()
         location = request.form.get('location', '').strip()
+        try:
+            daily_rate = parse_nonnegative_money(request.form.get('daily_rate', ''), 'Daily ward rate') if request.form.get('daily_rate', '').strip() else None
+        except ValueError as exc:
+            flash(str(exc), 'warning')
+            return redirect(url_for('admin.wards'))
 
         department = Department.query.filter_by(id=department_id, is_active=True).first()
         if not department or not name or not code:
@@ -289,6 +301,7 @@ def wards():
             code=code,
             ward_type=ward_type,
             location=location or None,
+            daily_rate=daily_rate,
             is_active=True,
         )
         db.session.add(ward)
@@ -332,6 +345,11 @@ def ward_detail(ward_id):
         code = request.form.get('code', '').strip().upper()
         ward_type = request.form.get('ward_type', 'General').strip()
         location = request.form.get('location', '').strip()
+        try:
+            daily_rate = parse_nonnegative_money(request.form.get('daily_rate', ''), 'Daily ward rate') if request.form.get('daily_rate', '').strip() else None
+        except ValueError as exc:
+            flash(str(exc), 'warning')
+            return redirect(url_for('admin.ward_detail', ward_id=ward.id))
         target_department = Department.query.filter_by(id=department_id, is_active=True).first()
 
         if not target_department or not name or not code:
@@ -367,6 +385,7 @@ def ward_detail(ward_id):
         ward.code = code
         ward.ward_type = ward_type
         ward.location = location or None
+        ward.daily_rate = daily_rate
         log_activity(
             'ward_updated',
             f'Updated ward {name} ({code}); department {old_department_id} → {ward.department_id}.',
@@ -541,6 +560,11 @@ def add_doctor():
         name = request.form.get('name', '').strip()
         specialization_id = request.form.get('specialization_id')
         department_id = request.form.get('department_id')
+        try:
+            consultation_fee = parse_nonnegative_money(request.form.get('consultation_fee', ''), 'Consultation fee') if request.form.get('consultation_fee', '').strip() else None
+        except ValueError as exc:
+            flash(str(exc), 'warning')
+            return redirect(url_for('admin.add_doctor'))
 
         password_ok, password_error = validate_password(password)
         if not username or not email or not password or not name:
@@ -569,7 +593,7 @@ def add_doctor():
         user.set_password(password)
         db.session.add(user)
         db.session.flush()
-        doctor = Doctor(id=user.id, name=name, specialization_id=spec_id, department_id=dept_id)
+        doctor = Doctor(id=user.id, name=name, specialization_id=spec_id, department_id=dept_id, consultation_fee=consultation_fee)
         db.session.add(doctor)
         log_activity('doctor_created', f'Added doctor {name} ({username}).', 'Doctor', user.id)
         notify_user(user.id, 'Doctor account created', 'Your doctor workspace is ready. Complete your profile and availability.', 'success', '/doctor/dashboard')
@@ -742,10 +766,16 @@ def edit_doctor(doctor_id):
         name = request.form.get('name', '').strip()
         specialization_id = request.form.get('specialization_id')
         department_id = request.form.get('department_id')
+        try:
+            consultation_fee = parse_nonnegative_money(request.form.get('consultation_fee', ''), 'Consultation fee') if request.form.get('consultation_fee', '').strip() else None
+        except ValueError as exc:
+            flash(str(exc), 'warning')
+            return redirect(url_for('admin.edit_doctor', doctor_id=doctor_id))
         if not name:
             flash('Doctor name is required.', 'warning')
             return redirect(url_for('admin.edit_doctor', doctor_id=doctor_id))
         doctor.name = name
+        doctor.consultation_fee = consultation_fee
         try:
             doctor.specialization_id = int(specialization_id) if specialization_id else None
         except ValueError:
@@ -1209,3 +1239,315 @@ def unblacklist_patient(patient_id):
     db.session.commit()
     flash(f'Patient {patient.name} has been unblacklisted.', 'success')
     return redirect(url_for('admin.admin_patients'))
+
+
+# ----------------------------- Phase 6D Billing -----------------------------
+
+@admin_bp.route('/billing')
+@login_required
+@role_required('Admin')
+def billing():
+    status = request.args.get('status', 'all')
+    q = request.args.get('q', '').strip()
+    query = Invoice.query.join(Patient, Invoice.patient_id == Patient.id)
+    if status in INVOICE_STATUSES:
+        query = query.filter(Invoice.status == status)
+    if q:
+        clauses = [
+            Patient.name.ilike(f'%{q}%'),
+            Invoice.invoice_number.ilike(f'%{q}%'),
+        ]
+        if q.isdigit():
+            clauses.append(Invoice.id == int(q))
+        query = query.filter(or_(*clauses))
+    invoices = query.order_by(Invoice.created_at.desc()).limit(250).all()
+    summary = billing_summary(days=30)
+    return render_template(
+        'admin_billing.html', invoices=invoices, summary=summary,
+        statuses=INVOICE_STATUSES, status=status, q=q,
+    )
+
+
+@admin_bp.route('/billing/services', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def billing_services():
+    if request.method == 'POST':
+        code = request.form.get('code', '').strip().upper()
+        name = request.form.get('name', '').strip()
+        category = request.form.get('category', '').strip()
+        try:
+            unit_price = parse_nonnegative_money(request.form.get('unit_price', ''), 'Service price')
+        except ValueError as exc:
+            flash(str(exc), 'warning')
+            return redirect(url_for('admin.billing_services'))
+        if not code or not name:
+            flash('Service code and name are required.', 'warning')
+            return redirect(url_for('admin.billing_services'))
+        duplicate = BillingService.query.filter(or_(
+            func.lower(BillingService.code) == code.lower(),
+            func.lower(BillingService.name) == name.lower(),
+        )).first()
+        if duplicate:
+            flash('A billing service already uses that code or name.', 'warning')
+            return redirect(url_for('admin.billing_services'))
+        service = BillingService(
+            code=code, name=name, category=category or None,
+            unit_price=unit_price, is_active=True,
+        )
+        db.session.add(service)
+        db.session.flush()
+        log_activity('billing_service_created', f'Created billable service {name} ({code}) at ₹{unit_price:.2f}.', 'BillingService', service.id)
+        db.session.commit()
+        flash(f'Billing service {name} created.', 'success')
+        return redirect(url_for('admin.billing_services'))
+
+    services = BillingService.query.order_by(BillingService.category, BillingService.name).all()
+    return render_template('admin_billing_services.html', services=services)
+
+
+@admin_bp.route('/billing/service/<int:service_id>/update', methods=['POST'])
+@login_required
+@role_required('Admin')
+def update_billing_service(service_id):
+    service = BillingService.query.get_or_404(service_id)
+    name = request.form.get('name', '').strip()
+    category = request.form.get('category', '').strip()
+    is_active = request.form.get('is_active') == '1'
+    try:
+        unit_price = parse_nonnegative_money(request.form.get('unit_price', ''), 'Service price')
+    except ValueError as exc:
+        flash(str(exc), 'warning')
+        return redirect(url_for('admin.billing_services'))
+    if not name:
+        flash('Service name is required.', 'warning')
+        return redirect(url_for('admin.billing_services'))
+    duplicate = BillingService.query.filter(
+        BillingService.id != service.id,
+        func.lower(BillingService.name) == name.lower(),
+    ).first()
+    if duplicate:
+        flash('Another billing service already uses that name.', 'warning')
+        return redirect(url_for('admin.billing_services'))
+    old_price = service.unit_price
+    service.name = name
+    service.category = category or None
+    service.unit_price = unit_price
+    service.is_active = is_active
+    log_activity('billing_service_updated', f'Updated billing service {service.code}; ₹{old_price or 0} → ₹{unit_price}.', 'BillingService', service.id)
+    db.session.commit()
+    flash(f'Billing service {service.name} updated.', 'success')
+    return redirect(url_for('admin.billing_services'))
+
+
+@admin_bp.route('/billing/new', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def new_invoice():
+    if request.method == 'POST':
+        source = request.form.get('source', 'manual')
+        patient_id = request.form.get('patient_id', type=int)
+        appointment_id = None
+        admission_id = None
+        if source.startswith('appointment:'):
+            try:
+                appointment_id = int(source.split(':', 1)[1])
+            except ValueError:
+                appointment_id = None
+            appointment = db.session.get(Appointment, appointment_id) if appointment_id else None
+            if appointment:
+                patient_id = appointment.patient_id
+        elif source.startswith('admission:'):
+            try:
+                admission_id = int(source.split(':', 1)[1])
+            except ValueError:
+                admission_id = None
+            admission = db.session.get(Admission, admission_id) if admission_id else None
+            if admission:
+                patient_id = admission.patient_id
+        try:
+            invoice = create_invoice(
+                patient_id=patient_id,
+                appointment_id=appointment_id,
+                admission_id=admission_id,
+                notes=request.form.get('notes'),
+            )
+            log_activity('invoice_created', f'Created draft invoice {invoice.invoice_number} for patient #{invoice.patient_id}.', 'Invoice', invoice.id)
+            db.session.commit()
+            flash(f'Draft invoice {invoice.invoice_number} created. Review charges before issuing.', 'success')
+            return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'warning')
+
+    patients = Patient.query.filter_by(is_blacklisted=False).order_by(Patient.name).all()
+    appointments = Appointment.query.filter_by(status='Completed').order_by(Appointment.date.desc()).limit(200).all()
+    admissions = Admission.query.filter_by(status='Discharged').order_by(Admission.discharged_at.desc()).limit(200).all()
+    preselected_appointment = request.args.get('appointment_id', type=int)
+    preselected_admission = request.args.get('admission_id', type=int)
+    preselected_patient = request.args.get('patient_id', type=int)
+    return render_template(
+        'admin_new_invoice.html', patients=patients, appointments=appointments, admissions=admissions,
+        preselected_appointment=preselected_appointment, preselected_admission=preselected_admission,
+        preselected_patient=preselected_patient,
+    )
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>')
+@login_required
+@role_required('Admin')
+def invoice_detail(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    refresh_invoice_totals(invoice)
+    db.session.commit()
+    services = BillingService.query.filter_by(is_active=True).order_by(BillingService.category, BillingService.name).all()
+    return render_template(
+        'invoice_detail.html', invoice=invoice, viewer_role='Admin', services=services,
+        payment_methods=PAYMENT_METHODS, back_url=url_for('admin.billing'),
+    )
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>/draft', methods=['POST'])
+@login_required
+@role_required('Admin')
+def update_invoice_draft(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    try:
+        save_invoice_draft(
+            invoice,
+            discount=request.form.get('discount', '0'),
+            due_date=request.form.get('due_date'),
+            notes=request.form.get('notes'),
+        )
+        log_activity('invoice_draft_updated', f'Updated draft {invoice.invoice_number}.', 'Invoice', invoice.id)
+        db.session.commit()
+        flash('Draft invoice updated.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>/item/manual', methods=['POST'])
+@login_required
+@role_required('Admin')
+def add_manual_invoice_item(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    try:
+        add_invoice_item(
+            invoice,
+            description=request.form.get('description'),
+            quantity=request.form.get('quantity', '1'),
+            unit_price=request.form.get('unit_price', '0'),
+        )
+        log_activity('invoice_item_added', f'Added manual charge to {invoice.invoice_number}.', 'Invoice', invoice.id)
+        db.session.commit()
+        flash('Charge added.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>/item/service', methods=['POST'])
+@login_required
+@role_required('Admin')
+def add_service_invoice_item(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    try:
+        add_service_to_invoice(
+            invoice,
+            request.form.get('service_id', type=int),
+            request.form.get('quantity', '1'),
+        )
+        log_activity('invoice_item_added', f'Added catalog service to {invoice.invoice_number}.', 'Invoice', invoice.id)
+        db.session.commit()
+        flash('Service charge added.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>/item/<int:item_id>/remove', methods=['POST'])
+@login_required
+@role_required('Admin')
+def remove_invoice_item(invoice_id, item_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    item = InvoiceItem.query.filter_by(id=item_id, invoice_id=invoice.id).first_or_404()
+    if invoice.status != 'Draft':
+        flash('Issued invoice charges can no longer be edited.', 'warning')
+        return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+    db.session.delete(item)
+    db.session.flush()
+    refresh_invoice_totals(invoice)
+    log_activity('invoice_item_removed', f'Removed a charge from {invoice.invoice_number}.', 'Invoice', invoice.id)
+    db.session.commit()
+    flash('Charge removed.', 'success')
+    return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>/issue', methods=['POST'])
+@login_required
+@role_required('Admin')
+def issue_invoice_route(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    try:
+        issue_invoice(invoice)
+        log_activity('invoice_issued', f'Issued {invoice.invoice_number} for ₹{invoice.total:.2f}.', 'Invoice', invoice.id)
+        notify_user(
+            invoice.patient_id, 'New hospital invoice',
+            f'{invoice.invoice_number} has been issued for ₹{invoice.total:.2f}. Outstanding balance: ₹{invoice.balance_due:.2f}.',
+            'info', f'/patient/billing/invoice/{invoice.id}',
+        )
+        db.session.commit()
+        flash(f'{invoice.invoice_number} issued to the patient.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>/payment', methods=['POST'])
+@login_required
+@role_required('Admin')
+def invoice_payment(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    try:
+        payment = record_payment(
+            invoice,
+            amount=request.form.get('amount'),
+            method=request.form.get('method', ''),
+            reference=request.form.get('reference'),
+            received_by_id=current_user.id,
+        )
+        log_activity('invoice_payment_recorded', f'Recorded ₹{payment.amount:.2f} payment on {invoice.invoice_number}.', 'Invoice', invoice.id)
+        notify_user(
+            invoice.patient_id, 'Payment recorded',
+            f'Payment of ₹{payment.amount:.2f} was recorded for {invoice.invoice_number}. Remaining balance: ₹{invoice.balance_due:.2f}.',
+            'success', f'/patient/billing/invoice/{invoice.id}',
+        )
+        db.session.commit()
+        flash('Payment recorded.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>/void', methods=['POST'])
+@login_required
+@role_required('Admin')
+def void_invoice_route(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    try:
+        void_invoice(invoice, request.form.get('reason'))
+        log_activity('invoice_voided', f'Voided {invoice.invoice_number}.', 'Invoice', invoice.id)
+        if invoice.issued_at:
+            notify_user(invoice.patient_id, 'Invoice voided', f'{invoice.invoice_number} has been voided by hospital billing.', 'warning', f'/patient/billing/invoice/{invoice.id}')
+        db.session.commit()
+        flash(f'{invoice.invoice_number} voided.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))

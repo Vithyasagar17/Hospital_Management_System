@@ -150,4 +150,27 @@ def ensure_phase6_schema():
     LabTest.__table__.create(bind=db.engine, checkfirst=True)
     LabOrder.__table__.create(bind=db.engine, checkfirst=True)
     LabOrderItem.__table__.create(bind=db.engine, checkfirst=True)
+
+    # Phase 6D: billing rates, historical price snapshots, invoices and payments.
+    _add_columns('doctor', {
+        'consultation_fee': 'NUMERIC(10, 2)',
+    })
+    _add_columns('ward', {
+        'daily_rate': 'NUMERIC(10, 2)',
+    })
+    _add_columns('admission', {
+        'room_rate_snapshot': 'NUMERIC(10, 2)',
+    })
+    _add_columns('bed_transfer', {
+        'from_daily_rate_snapshot': 'NUMERIC(10, 2)',
+        'to_daily_rate_snapshot': 'NUMERIC(10, 2)',
+    })
+    _add_columns('lab_order_item', {
+        'price_snapshot': 'NUMERIC(10, 2)',
+    })
+    from app.models import BillingService, Invoice, InvoiceItem, Payment
+    BillingService.__table__.create(bind=db.engine, checkfirst=True)
+    Invoice.__table__.create(bind=db.engine, checkfirst=True)
+    InvoiceItem.__table__.create(bind=db.engine, checkfirst=True)
+    Payment.__table__.create(bind=db.engine, checkfirst=True)
     db.session.commit()

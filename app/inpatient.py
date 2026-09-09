@@ -153,6 +153,7 @@ def admit_patient(*, patient_id, doctor_id, department_id, bed_id, reason,
         reason=reason.strip(),
         diagnosis=(diagnosis or '').strip() or None,
         status='Active',
+        room_rate_snapshot=bed.ward.daily_rate,
         created_by_id=created_by_id,
     )
     bed.status = 'Occupied'
@@ -188,6 +189,8 @@ def transfer_admission(admission, *, to_bed_id, transferred_by_id=None, reason=N
         reason=(reason or '').strip() or None,
         transferred_at=datetime.utcnow(),
         transferred_by_id=transferred_by_id,
+        from_daily_rate_snapshot=old_ward.daily_rate,
+        to_daily_rate_snapshot=target.ward.daily_rate,
     )
 
     old_bed.status = 'Available'

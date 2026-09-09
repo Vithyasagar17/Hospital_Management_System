@@ -38,6 +38,8 @@
       <div class="hms-panel-head"><div><span class="hms-kicker">Close stay</span><h3>Discharge</h3></div><i class="bi bi-box-arrow-right"></i></div>
       <form method="POST" action="{{ discharge_url }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><div class="mb-3"><label class="form-label">Discharge summary</label><textarea name="summary" class="form-control" required placeholder="Condition at discharge, plan, follow-up instructions..."></textarea></div><button class="btn btn-outline-danger w-100" onclick="return confirm('Discharge this patient and release the bed?')">Discharge patient</button></form>
     </section>
+    {% elif viewer_role == 'Admin' and admission.status == 'Discharged' %}
+    <section class="hms-panel"><div class="hms-panel-head"><div><span class="hms-kicker">Financial closeout</span><h3>Generate inpatient invoice</h3></div><i class="bi bi-receipt-cutoff"></i></div><p class="text-muted small">Create a draft using ward/day charges and completed laboratory tests linked to this stay.</p><a class="btn btn-primary w-100" href="{{ url_for('admin.new_invoice', admission_id=admission.id) }}">Generate invoice</a></section>
     {% elif viewer_role == 'Patient' and admission.status == 'Active' %}
     <section class="hms-panel"><div class="hms-panel-head"><div><span class="hms-kicker">Current stay</span><h3>You are currently admitted</h3></div><i class="bi bi-heart-pulse"></i></div><p class="text-muted small mb-0">Your ward and bed placement shown here reflects the latest inpatient assignment recorded by the hospital.</p></section>
     {% endif %}

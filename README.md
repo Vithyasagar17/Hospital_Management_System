@@ -159,3 +159,17 @@ See `PHASE6_UPGRADE_NOTES.md` for the Phase 6A, 6B.1 and 6B.2 demo flows.
 - Patient result portal plus Doctor/Admin laboratory workspaces
 - Result-ready notifications, audit logging, and historical test-definition snapshots
 - Additive schema upgrade with no database reset
+
+### Phase 6D billing & invoicing
+
+- Doctor consultation fees and ward daily rates as configurable billable rates
+- Billing service/charge catalog for reusable procedures, supplies, and other services
+- Draft invoices generated from completed appointments or discharged inpatient stays
+- Automatic consultation, laboratory, and inpatient room/bed charge import
+- Historical price snapshots so later catalog/rate edits do not rewrite old financial records
+- Draft discounts, due dates, notes, manual charges, and catalog service charges
+- Invoice lifecycle: Draft, Issued, Partially Paid, Paid, and controlled Void
+- Payment ledger for Cash, Card, UPI, Bank Transfer, Insurance, and Other methods
+- Patient bills/payment portal, outstanding-balance visibility, notifications, and printable invoices
+- Admin receivables dashboard for outstanding value, 30-day collections, issued value, unpaid bills, and drafts
+- Additive schema upgrade with no database reset

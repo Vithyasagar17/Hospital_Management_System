@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timedelta
 from app import create_app, db
-from app.models import User, Specialization, Department, Doctor, Patient, DoctorAvailability, Appointment, Prescription, PrescriptionItem, Notification, AuditLog, LabTest
+from app.models import User, Specialization, Department, Doctor, Patient, DoctorAvailability, Appointment, Prescription, PrescriptionItem, Notification, AuditLog, LabTest, BillingService
 
 app = create_app()
 
@@ -132,6 +132,18 @@ with app.app_context():
             ))
     db.session.commit()
 
+    # Phase 6D reusable billing/charge catalog.
+    billing_services = [
+        ('ECG', '12-lead ECG', 'Procedure', 450.00),
+        ('NEB', 'Nebulization', 'Procedure', 300.00),
+        ('DRESS', 'Wound dressing', 'Nursing', 250.00),
+        ('AMB', 'Ambulance service', 'Transport', 1200.00),
+    ]
+    for code, name, category, price in billing_services:
+        if not BillingService.query.filter_by(code=code).first():
+            db.session.add(BillingService(code=code, name=name, category=category, unit_price=price, is_active=True))
+    db.session.commit()
+
     if not User.query.filter_by(username='dr_sample').first():
         doctor_user = User(username='dr_sample', email='doctor@medora.local', email_verified=True, role='Doctor')
         doctor_user.set_password('doctorpass')
@@ -144,6 +156,7 @@ with app.app_context():
             id=doctor_user.id, name='Alice Smith',
             specialization_id=gen_med.id if gen_med else None,
             department_id=gen_dept.id if gen_dept else None,
+            consultation_fee=500.00,
         )
         db.session.add(doctor)
         db.session.commit()

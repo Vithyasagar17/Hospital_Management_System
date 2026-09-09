@@ -11,6 +11,7 @@
 
 {% if current_admission %}<div class="alert alert-info d-flex justify-content-between align-items-center gap-3 flex-wrap"><div><i class="bi bi-hospital me-2"></i><strong>Currently admitted:</strong> {{ current_admission.department.name }} · {{ current_admission.ward.name }} · Bed {{ current_admission.bed.bed_number }}</div><a href="{{ url_for('patient.admission_detail', admission_id=current_admission.id) }}" class="btn btn-sm btn-outline-primary">View inpatient stay</a></div>{% endif %}
 {% if open_lab_orders %}<div class="alert alert-light border d-flex justify-content-between align-items-center gap-3 flex-wrap"><div><i class="bi bi-clipboard2-pulse me-2 text-primary"></i><strong>{{ open_lab_orders }} laboratory order{{ '' if open_lab_orders == 1 else 's' }}</strong> currently in progress.</div><a href="{{ url_for('patient.laboratory') }}" class="btn btn-sm btn-outline-primary">Track laboratory</a></div>{% endif %}
+{% if open_invoice_count %}<div class="alert alert-warning d-flex justify-content-between align-items-center gap-3 flex-wrap"><div><i class="bi bi-receipt me-2"></i><strong>{{ open_invoice_count }} unpaid invoice{{ '' if open_invoice_count == 1 else 's' }}</strong> · Outstanding ₹{{ '%.2f'|format(outstanding_balance) }}</div><a href="{{ url_for('patient.billing') }}" class="btn btn-sm btn-outline-dark">View billing</a></div>{% endif %}
 
 <div class="row g-3 mb-4">
   <div class="col-md-4"><div class="hms-metric-card"><span class="hms-metric-icon warning"><i class="bi bi-hourglass-split"></i></span><div><strong>{{ pending_count }}</strong><small>Pending requests</small></div></div></div>
@@ -49,6 +50,7 @@
   <div class="col-md-6 col-xl-3"><div class="hms-action-card"><div class="hms-icon"><i class="bi bi-clipboard2-pulse"></i></div><div><h3>Medical history</h3><p>Review previous consultations and clinical records.</p></div><a href="{{ url_for('patient.medical_history') }}" class="btn btn-outline-primary">History</a></div></div>
   <div class="col-md-6 col-xl-3"><div class="hms-action-card"><div class="hms-icon"><i class="bi bi-hospital"></i></div><div><h3>Hospital stays</h3><p>Review current inpatient placement and discharge history.</p></div><a href="{{ url_for('patient.admissions') }}" class="btn btn-outline-primary">Admission history</a></div></div>
   <div class="col-md-6 col-xl-3"><div class="hms-action-card"><div class="hms-icon"><i class="bi bi-clipboard2-pulse"></i></div><div><h3>Laboratory</h3><p>{{ open_lab_orders }} in progress · {{ completed_lab_orders }} result set{{ '' if completed_lab_orders == 1 else 's' }} released.</p></div><a href="{{ url_for('patient.laboratory') }}" class="btn btn-outline-primary">Lab results</a></div></div>
+  <div class="col-md-6 col-xl-3"><div class="hms-action-card"><div class="hms-icon"><i class="bi bi-receipt"></i></div><div><h3>Billing</h3><p>{{ open_invoice_count }} unpaid · ₹{{ '%.2f'|format(outstanding_balance) }} outstanding.</p></div><a href="{{ url_for('patient.billing') }}" class="btn btn-outline-primary">Bills & payments</a></div></div>
 </div>
 {% endblock %}
 {% block scripts %}

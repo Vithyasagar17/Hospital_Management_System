@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import login_required, current_user
 from app.routes.auth_decorator import role_required
-from app.models import Patient, Doctor, Appointment, Specialization, Department, DoctorAvailability, Prescription, AppointmentReminder, WaitlistEntry, Admission, LabOrder, LabOrderItem
+from app.models import Patient, Doctor, Appointment, Specialization, Department, DoctorAvailability, Prescription, AppointmentReminder, WaitlistEntry, Admission, LabOrder, LabOrderItem, Invoice
 from app import db
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
@@ -46,6 +46,11 @@ def patient_dashboard():
         LabOrder.status.in_(['Ordered', 'Sample Collected', 'Processing'])
     ).count()
     completed_lab_orders = LabOrder.query.filter_by(patient_id=current_user.id, status='Completed').count()
+    open_invoices = Invoice.query.filter(
+        Invoice.patient_id == current_user.id,
+        Invoice.status.in_(['Issued', 'Partially Paid'])
+    ).all()
+    outstanding_balance = sum((invoice.balance_due or 0 for invoice in open_invoices), 0)
 
     status_counts = {
         status: base_query.filter_by(status=status).count()
@@ -56,7 +61,8 @@ def patient_dashboard():
         pending_count=pending_count, confirmed_count=confirmed_count,
         completed_count=completed_count, status_counts=status_counts,
         current_admission=current_admission, open_lab_orders=open_lab_orders,
-        completed_lab_orders=completed_lab_orders
+        completed_lab_orders=completed_lab_orders, open_invoice_count=len(open_invoices),
+        outstanding_balance=outstanding_balance
     )
 
 
@@ -172,6 +178,35 @@ def lab_order_detail(order_id):
         'lab_order_detail.html', order=order, viewer_role='Patient',
         back_url=url_for('patient.laboratory'), statuses=(), interpretations=(),
         transition_url=None, results_url=None, cancel_url=None,
+    )
+
+
+@patient_bp.route('/billing')
+@login_required
+@role_required('Patient')
+def billing():
+    status = request.args.get('status', 'all')
+    query = Invoice.query.filter(
+        Invoice.patient_id == current_user.id,
+        Invoice.status != 'Draft',
+    )
+    if status in {'Issued', 'Partially Paid', 'Paid', 'Void'}:
+        query = query.filter(Invoice.status == status)
+    invoices = query.order_by(Invoice.created_at.desc()).all()
+    outstanding = sum((invoice.balance_due or 0 for invoice in invoices if invoice.status in ('Issued', 'Partially Paid')), 0)
+    return render_template('patient_billing.html', invoices=invoices, status=status, outstanding=outstanding)
+
+
+@patient_bp.route('/billing/invoice/<int:invoice_id>')
+@login_required
+@role_required('Patient')
+def invoice_detail(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    if invoice.patient_id != current_user.id or invoice.status == 'Draft':
+        abort(403)
+    return render_template(
+        'invoice_detail.html', invoice=invoice, viewer_role='Patient', services=[],
+        payment_methods=(), back_url=url_for('patient.billing'),
     )
 
 
