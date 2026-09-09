@@ -145,3 +145,58 @@ This slice turns the ward/bed inventory into a real inpatient workflow.
 ## Next
 
 Phase 6C can add **laboratory ordering, sample tracking, results, and result notifications** on top of appointments and inpatient stays.
+
+---
+
+# Phase 6C — Laboratory Management
+
+This slice adds a structured diagnostics workflow across outpatient and inpatient care.
+
+## Added
+
+- First-class `LabTest` catalog with code, name, category, specimen type, default unit, reference range, base price, turnaround time, and active/inactive state.
+- Multi-test `LabOrder` records linked to patient, ordering doctor, optional appointment, and optional inpatient admission.
+- Historical `LabOrderItem` snapshots preserve the exact test name/code/unit/reference range even if the catalog changes later.
+- Clinical priorities: `Routine`, `Urgent`, and `STAT`.
+- Laboratory workflow: `Ordered → Sample Collected → Processing → Completed` with cancellation before completion.
+- Specimen tracking using a unique specimen ID / barcode and optional collection notes.
+- Structured result entry with value, reference range, interpretation (`Normal`, `Low`, `High`, `Abnormal`, `Critical`) and result note.
+- Results can only be released after every ordered test has a result.
+- Doctors can order tests only for patients with an existing appointment/admission relationship.
+- Doctors can cancel an order only before sample collection begins.
+- Admin laboratory operations workspace for specimen collection, processing, result release, and catalog management.
+- Patient laboratory portal for order tracking and released results.
+- Notifications for new orders, sample collection, processing, cancellation, and released results.
+- Audit events for catalog changes, orders, workflow transitions, cancellation, and result release.
+- Dashboard visibility for open laboratory workload.
+
+## Safety and data-integrity rules
+
+- Inactive catalog tests cannot be used in new orders.
+- A laboratory order must contain at least one active test.
+- Duplicate tests inside one order are collapsed/rejected by database uniqueness.
+- Specimen IDs are unique across laboratory orders.
+- Workflow transitions are sequential; result release cannot bypass collection/processing.
+- `Completed` is not available through the generic status transition path; completion requires validated results for every order item.
+- Patients can only read their own laboratory records.
+- Doctors can only read/cancel laboratory orders they created.
+- Historical orders use test snapshots so later catalog edits do not rewrite old clinical records.
+
+## Database compatibility
+
+`ensure_phase6_schema()` creates `lab_test`, `lab_order`, and `lab_order_item` using `checkfirst=True`. Existing Phase 6A/6B departments, wards, beds, admissions, appointments and prescriptions remain intact. No database reset is required.
+
+## Recommended demo
+
+1. Admin → Laboratory → Test catalog → create CBC and Fasting Blood Sugar.
+2. Doctor → Patient → **Order lab tests** → select both tests and choose `Urgent`.
+3. Patient → Laboratory → show the new `Ordered` record.
+4. Admin → Laboratory → open the order → record specimen `SP-2026-0001` and mark **Sample Collected**.
+5. Advance to **Processing**.
+6. Enter results for every test, including an interpretation, then **Finalize results**.
+7. Patient receives a result notification and can read the released values/reference ranges.
+8. Doctor receives a result notification and can review the same finalized order.
+
+## Next
+
+Phase 6D can build **Billing & Invoicing** using appointment charges, inpatient stay charges, and the `LabTest.base_price` values introduced here.

@@ -201,6 +201,68 @@ class BedTransfer(db.Model):
     transferred_by = db.relationship('User', foreign_keys=[transferred_by_id])
 
 
+class LabTest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(30), unique=True, nullable=False, index=True)
+    name = db.Column(db.String(160), unique=True, nullable=False)
+    category = db.Column(db.String(80), nullable=True, index=True)
+    specimen_type = db.Column(db.String(80), nullable=True)
+    default_unit = db.Column(db.String(40), nullable=True)
+    reference_range = db.Column(db.String(120), nullable=True)
+    base_price = db.Column(db.Numeric(10, 2), nullable=True)
+    turnaround_hours = db.Column(db.Integer, nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+
+class LabOrder(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    patient_id = db.Column(db.Integer, db.ForeignKey('patient.id'), nullable=False, index=True)
+    doctor_id = db.Column(db.Integer, db.ForeignKey('doctor.id'), nullable=False, index=True)
+    appointment_id = db.Column(db.Integer, db.ForeignKey('appointment.id'), nullable=True, index=True)
+    admission_id = db.Column(db.Integer, db.ForeignKey('admission.id'), nullable=True, index=True)
+    priority = db.Column(db.String(20), default='Routine', nullable=False, index=True)
+    status = db.Column(db.String(30), default='Ordered', nullable=False, index=True)
+    clinical_notes = db.Column(db.Text, nullable=True)
+    specimen_id = db.Column(db.String(80), unique=True, nullable=True, index=True)
+    sample_notes = db.Column(db.String(500), nullable=True)
+    ordered_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False, index=True)
+    sample_collected_at = db.Column(db.DateTime, nullable=True)
+    processing_started_at = db.Column(db.DateTime, nullable=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    cancelled_at = db.Column(db.DateTime, nullable=True)
+    cancelled_reason = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+    patient = db.relationship('Patient', backref=db.backref('lab_orders', lazy=True), foreign_keys=[patient_id])
+    doctor = db.relationship('Doctor', backref=db.backref('lab_orders', lazy=True), foreign_keys=[doctor_id])
+    appointment = db.relationship('Appointment', backref=db.backref('lab_orders', lazy=True), foreign_keys=[appointment_id])
+    admission = db.relationship('Admission', backref=db.backref('lab_orders', lazy=True), foreign_keys=[admission_id])
+
+
+class LabOrderItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    lab_order_id = db.Column(db.Integer, db.ForeignKey('lab_order.id'), nullable=False, index=True)
+    lab_test_id = db.Column(db.Integer, db.ForeignKey('lab_test.id'), nullable=False, index=True)
+    test_code_snapshot = db.Column(db.String(30), nullable=False)
+    test_name_snapshot = db.Column(db.String(160), nullable=False)
+    unit_snapshot = db.Column(db.String(40), nullable=True)
+    reference_range_snapshot = db.Column(db.String(120), nullable=True)
+    result_value = db.Column(db.Text, nullable=True)
+    interpretation = db.Column(db.String(30), nullable=True)
+    result_notes = db.Column(db.String(500), nullable=True)
+    resulted_at = db.Column(db.DateTime, nullable=True)
+
+    order = db.relationship('LabOrder', backref=db.backref('items', lazy=True, cascade='all, delete-orphan'))
+    lab_test = db.relationship('LabTest', backref=db.backref('order_items', lazy=True))
+
+    __table_args__ = (
+        db.UniqueConstraint('lab_order_id', 'lab_test_id', name='uq_lab_order_test'),
+    )
+
+
 class Prescription(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     appointment_id = db.Column(db.Integer, db.ForeignKey('appointment.id'), nullable=False)

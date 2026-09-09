@@ -55,6 +55,7 @@
         <button class="btn btn-outline-primary btn-sm mt-2" type="submit">Save notes</button>
       </form>
     </section>
+    <section class="hms-panel mb-4"><div class="hms-panel-head"><div><div class="hms-kicker">Diagnostics</div><h3>Laboratory</h3></div><i class="bi bi-clipboard2-pulse"></i></div><p class="text-muted small">Order diagnostic tests linked to this consultation.</p><a href="{{ url_for('doctor.new_lab_order', patient_id=appointment.patient_id, appointment_id=appointment.id) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-plus-circle me-1"></i> Order lab tests</a></section>
     {% if appointment.status in ['Pending','Confirmed'] %}
     <section class="hms-panel">
       <div class="hms-panel-head"><div><div class="hms-kicker">Workflow</div><h3>Update visit status</h3></div><i class="bi bi-arrow-repeat"></i></div>

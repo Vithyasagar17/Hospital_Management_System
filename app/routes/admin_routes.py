@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 from sqlalchemy import or_, func, and_
 from app import db
-from app.models import Doctor, Patient, Appointment, Specialization, User, AuditLog, Department, Ward, Bed, Admission
+from app.models import Doctor, Patient, Appointment, Specialization, User, AuditLog, Department, Ward, Bed, Admission, LabTest, LabOrder, LabOrderItem
 from app.routes.auth_decorator import role_required
 from app.activity import log_activity, notify_user
 from app.security import send_verification_email, validate_password
@@ -12,6 +12,10 @@ from app.inpatient import (
     ADMIN_SETTABLE_BED_STATUSES, WARD_TYPES,
     admit_patient, available_beds, department_bed_snapshot, discharge_admission,
     hospital_bed_snapshot, transfer_admission, ward_snapshot,
+)
+from app.laboratory import (
+    LAB_INTERPRETATIONS, LAB_ORDER_STATUSES, LAB_PRIORITIES,
+    complete_lab_order, lab_order_summary, parse_price, transition_lab_order,
 )
 from datetime import datetime, timedelta
 from sqlalchemy.exc import IntegrityError
@@ -42,6 +46,7 @@ def admin_dashboard():
     total_appointments = Appointment.query.count()
     bed_snapshot = hospital_bed_snapshot()
     active_inpatients = Admission.query.filter_by(status='Active').count()
+    open_lab_orders = LabOrder.query.filter(LabOrder.status.in_(['Ordered', 'Sample Collected', 'Processing'])).count()
     appointments_today = Appointment.query.filter(
         Appointment.date >= datetime.combine(today, datetime.min.time()),
         Appointment.date < datetime.combine(tomorrow, datetime.min.time())
@@ -75,6 +80,7 @@ def admin_dashboard():
         total_appointments=total_appointments,
         bed_snapshot=bed_snapshot,
         active_inpatients=active_inpatients,
+        open_lab_orders=open_lab_orders,
         appointments_today=appointments_today,
         status_counts=status_counts,
         recent_appointments=recent_appointments,
@@ -798,6 +804,206 @@ def edit_patient(patient_id):
         flash(f'Patient {name} updated successfully.', 'success')
         return redirect(url_for('admin.admin_patients'))
     return render_template('admin_edit_patient.html', patient=patient)
+
+
+
+@admin_bp.route('/laboratory')
+@login_required
+@role_required('Admin')
+def laboratory():
+    status = request.args.get('status', 'all')
+    priority = request.args.get('priority', 'all')
+    q = request.args.get('q', '').strip()
+
+    query = LabOrder.query.join(Patient, LabOrder.patient_id == Patient.id).join(
+        Doctor, LabOrder.doctor_id == Doctor.id
+    )
+    if status in LAB_ORDER_STATUSES:
+        query = query.filter(LabOrder.status == status)
+    if priority in LAB_PRIORITIES:
+        query = query.filter(LabOrder.priority == priority)
+    if q:
+        query = query.filter(or_(
+            Patient.name.ilike(f'%{q}%'),
+            Doctor.name.ilike(f'%{q}%'),
+            LabOrder.items.any(LabOrderItem.test_name_snapshot.ilike(f'%{q}%')),
+            LabOrder.items.any(LabOrderItem.test_code_snapshot.ilike(f'%{q}%')),
+        ))
+    orders = query.order_by(LabOrder.ordered_at.desc(), LabOrder.id.desc()).all()
+    summary = lab_order_summary(LabOrder.query)
+    return render_template(
+        'admin_lab_orders.html', orders=orders, summary=summary, status=status,
+        priority=priority, q=q, statuses=LAB_ORDER_STATUSES, priorities=LAB_PRIORITIES,
+    )
+
+
+@admin_bp.route('/laboratory/tests', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def lab_catalog():
+    if request.method == 'POST':
+        code = request.form.get('code', '').strip().upper()
+        name = request.form.get('name', '').strip()
+        category = request.form.get('category', '').strip()
+        specimen_type = request.form.get('specimen_type', '').strip()
+        default_unit = request.form.get('default_unit', '').strip()
+        reference_range = request.form.get('reference_range', '').strip()
+        turnaround_raw = request.form.get('turnaround_hours', '').strip()
+        if not code or not name:
+            flash('Test code and name are required.', 'warning')
+            return redirect(url_for('admin.lab_catalog'))
+        duplicate = LabTest.query.filter(or_(
+            func.lower(LabTest.code) == code.lower(),
+            func.lower(LabTest.name) == name.lower(),
+        )).first()
+        if duplicate:
+            flash('A laboratory test with that code or name already exists.', 'warning')
+            return redirect(url_for('admin.lab_catalog'))
+        try:
+            price = parse_price(request.form.get('base_price'))
+            turnaround_hours = int(turnaround_raw) if turnaround_raw else None
+            if turnaround_hours is not None and turnaround_hours < 0:
+                raise ValueError('Turnaround hours cannot be negative.')
+        except ValueError as exc:
+            flash(str(exc), 'warning')
+            return redirect(url_for('admin.lab_catalog'))
+
+        test = LabTest(
+            code=code, name=name, category=category or None,
+            specimen_type=specimen_type or None, default_unit=default_unit or None,
+            reference_range=reference_range or None, base_price=price,
+            turnaround_hours=turnaround_hours, is_active=True,
+        )
+        db.session.add(test)
+        db.session.flush()
+        log_activity('lab_test_created', f'Created laboratory test {name} ({code}).', 'LabTest', test.id)
+        db.session.commit()
+        flash(f'Laboratory test {name} created.', 'success')
+        return redirect(url_for('admin.lab_catalog'))
+
+    tests = LabTest.query.order_by(LabTest.is_active.desc(), LabTest.category, LabTest.name).all()
+    return render_template('admin_lab_catalog.html', tests=tests)
+
+
+@admin_bp.route('/laboratory/test/<int:test_id>/update', methods=['POST'])
+@login_required
+@role_required('Admin')
+def update_lab_test(test_id):
+    test = LabTest.query.get_or_404(test_id)
+    name = request.form.get('name', '').strip()
+    category = request.form.get('category', '').strip()
+    specimen_type = request.form.get('specimen_type', '').strip()
+    default_unit = request.form.get('default_unit', '').strip()
+    reference_range = request.form.get('reference_range', '').strip()
+    turnaround_raw = request.form.get('turnaround_hours', '').strip()
+    is_active = request.form.get('is_active') == '1'
+    if not name:
+        flash('Test name is required.', 'warning')
+        return redirect(url_for('admin.lab_catalog'))
+    duplicate = LabTest.query.filter(
+        func.lower(LabTest.name) == name.lower(), LabTest.id != test.id
+    ).first()
+    if duplicate:
+        flash('Another laboratory test already uses that name.', 'warning')
+        return redirect(url_for('admin.lab_catalog'))
+    try:
+        price = parse_price(request.form.get('base_price'))
+        turnaround_hours = int(turnaround_raw) if turnaround_raw else None
+        if turnaround_hours is not None and turnaround_hours < 0:
+            raise ValueError('Turnaround hours cannot be negative.')
+    except ValueError as exc:
+        flash(str(exc), 'warning')
+        return redirect(url_for('admin.lab_catalog'))
+
+    previous_state = test.is_active
+    test.name = name
+    test.category = category or None
+    test.specimen_type = specimen_type or None
+    test.default_unit = default_unit or None
+    test.reference_range = reference_range or None
+    test.base_price = price
+    test.turnaround_hours = turnaround_hours
+    test.is_active = is_active
+    log_activity(
+        'lab_test_updated',
+        f'Updated laboratory test {test.code}; active {previous_state} → {test.is_active}.',
+        'LabTest', test.id,
+    )
+    db.session.commit()
+    flash(f'{test.code} updated.', 'success')
+    return redirect(url_for('admin.lab_catalog'))
+
+
+@admin_bp.route('/laboratory/order/<int:order_id>')
+@login_required
+@role_required('Admin')
+def lab_order_detail(order_id):
+    order = LabOrder.query.get_or_404(order_id)
+    return render_template(
+        'lab_order_detail.html', order=order, viewer_role='Admin',
+        back_url=url_for('admin.laboratory'), statuses=LAB_ORDER_STATUSES,
+        interpretations=LAB_INTERPRETATIONS,
+        transition_url=url_for('admin.transition_lab_order_route', order_id=order.id),
+        results_url=url_for('admin.lab_results', order_id=order.id), cancel_url=None,
+    )
+
+
+@admin_bp.route('/laboratory/order/<int:order_id>/status', methods=['POST'])
+@login_required
+@role_required('Admin')
+def transition_lab_order_route(order_id):
+    order = LabOrder.query.get_or_404(order_id)
+    new_status = request.form.get('status', '').strip()
+    previous_status = order.status
+    try:
+        transition_lab_order(
+            order, new_status, cancelled_reason=request.form.get('cancelled_reason'),
+            specimen_id=request.form.get('specimen_id'), sample_notes=request.form.get('sample_notes'),
+        )
+        log_activity(
+            'lab_order_status_changed',
+            f'Lab order #{order.id}: {previous_status} → {new_status}.',
+            'LabOrder', order.id,
+        )
+        if new_status == 'Sample Collected':
+            notify_user(order.patient_id, 'Lab sample collected', f'Sample collection is complete for lab order #{order.id}.', 'info', f'/patient/laboratory/order/{order.id}')
+        elif new_status == 'Processing':
+            notify_user(order.patient_id, 'Lab tests processing', f'Lab order #{order.id} is now being processed.', 'info', f'/patient/laboratory/order/{order.id}')
+        elif new_status == 'Cancelled':
+            message = f'Lab order #{order.id} was cancelled. Reason: {order.cancelled_reason}'
+            notify_user(order.patient_id, 'Lab order cancelled', message, 'warning', f'/patient/laboratory/order/{order.id}')
+            notify_user(order.doctor_id, 'Lab order cancelled', message, 'warning', f'/doctor/laboratory/order/{order.id}')
+        db.session.commit()
+        flash(f'Lab order moved to {new_status}.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.lab_order_detail', order_id=order.id))
+
+
+@admin_bp.route('/laboratory/order/<int:order_id>/results', methods=['POST'])
+@login_required
+@role_required('Admin')
+def lab_results(order_id):
+    order = LabOrder.query.get_or_404(order_id)
+    payload = {}
+    for item in order.items:
+        payload[item.id] = {
+            'value': request.form.get(f'result_{item.id}', ''),
+            'interpretation': request.form.get(f'interpretation_{item.id}', ''),
+            'notes': request.form.get(f'notes_{item.id}', ''),
+        }
+    try:
+        complete_lab_order(order, payload)
+        log_activity('lab_results_completed', f'Finalized results for lab order #{order.id}.', 'LabOrder', order.id)
+        notify_user(order.patient_id, 'Lab results available', f'Results for lab order #{order.id} are ready to review.', 'success', f'/patient/laboratory/order/{order.id}')
+        notify_user(order.doctor_id, 'Lab results available', f'Results for {order.patient.name or "your patient"} are ready in lab order #{order.id}.', 'success', f'/doctor/laboratory/order/{order.id}')
+        db.session.commit()
+        flash('Laboratory results finalized and released.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.lab_order_detail', order_id=order.id))
 
 
 @admin_bp.route('/admissions', methods=['GET', 'POST'])

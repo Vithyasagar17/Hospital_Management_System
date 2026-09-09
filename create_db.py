@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timedelta
 from app import create_app, db
-from app.models import User, Specialization, Department, Doctor, Patient, DoctorAvailability, Appointment, Prescription, PrescriptionItem, Notification, AuditLog
+from app.models import User, Specialization, Department, Doctor, Patient, DoctorAvailability, Appointment, Prescription, PrescriptionItem, Notification, AuditLog, LabTest
 
 app = create_app()
 
@@ -111,6 +111,24 @@ with app.app_context():
             db.session.add(Department(
                 name=department_name, code=code, description=description,
                 location=location, is_active=True,
+            ))
+    db.session.commit()
+
+    # Phase 6C laboratory catalog used by the diagnostic ordering workflow.
+    lab_tests = [
+        ('CBC', 'Complete Blood Count', 'Hematology', 'Whole blood', None, None, 350.00, 6),
+        ('FBS', 'Fasting Blood Sugar', 'Biochemistry', 'Plasma', 'mg/dL', '70-99', 180.00, 4),
+        ('HBA1C', 'HbA1c', 'Biochemistry', 'Whole blood', '%', '4.0-5.6', 650.00, 12),
+        ('LIPID', 'Lipid Profile', 'Biochemistry', 'Serum', 'mg/dL', None, 850.00, 12),
+        ('TSH', 'Thyroid Stimulating Hormone', 'Endocrinology', 'Serum', 'mIU/L', '0.4-4.0', 700.00, 18),
+        ('CRP', 'C-Reactive Protein', 'Immunology', 'Serum', 'mg/L', '< 10', 500.00, 8),
+    ]
+    for code, name, category, specimen, unit, reference, price, tat in lab_tests:
+        if not LabTest.query.filter_by(code=code).first():
+            db.session.add(LabTest(
+                code=code, name=name, category=category, specimen_type=specimen,
+                default_unit=unit, reference_range=reference, base_price=price,
+                turnaround_hours=tat, is_active=True,
             ))
     db.session.commit()
 

@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import login_required, current_user
 from app.routes.auth_decorator import role_required
-from app.models import Patient, Doctor, Appointment, Specialization, Department, DoctorAvailability, Prescription, AppointmentReminder, WaitlistEntry, Admission
+from app.models import Patient, Doctor, Appointment, Specialization, Department, DoctorAvailability, Prescription, AppointmentReminder, WaitlistEntry, Admission, LabOrder, LabOrderItem
 from app import db
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
@@ -41,6 +41,11 @@ def patient_dashboard():
     completed_count = base_query.filter_by(status='Completed').count()
 
     current_admission = active_admission_for_patient(current_user.id)
+    open_lab_orders = LabOrder.query.filter(
+        LabOrder.patient_id == current_user.id,
+        LabOrder.status.in_(['Ordered', 'Sample Collected', 'Processing'])
+    ).count()
+    completed_lab_orders = LabOrder.query.filter_by(patient_id=current_user.id, status='Completed').count()
 
     status_counts = {
         status: base_query.filter_by(status=status).count()
@@ -50,7 +55,8 @@ def patient_dashboard():
         'patient_dashboard.html', patient_name=patient_name, upcoming=upcoming,
         pending_count=pending_count, confirmed_count=confirmed_count,
         completed_count=completed_count, status_counts=status_counts,
-        current_admission=current_admission
+        current_admission=current_admission, open_lab_orders=open_lab_orders,
+        completed_lab_orders=completed_lab_orders
     )
 
 
@@ -129,6 +135,43 @@ def admission_detail(admission_id):
         'inpatient_admission_detail.html', admission=admission, transfers=transfers,
         transfer_beds=[], viewer_role='Patient', transfer_url=None, discharge_url=None,
         back_url=url_for('patient.admissions'),
+    )
+
+
+
+@patient_bp.route('/laboratory')
+@login_required
+@role_required('Patient')
+def laboratory():
+    status = request.args.get('status', 'all')
+    q = request.args.get('q', '').strip()
+    query = LabOrder.query.join(Doctor, LabOrder.doctor_id == Doctor.id).filter(
+        LabOrder.patient_id == current_user.id
+    )
+    valid_statuses = {'Ordered', 'Sample Collected', 'Processing', 'Completed', 'Cancelled'}
+    if status in valid_statuses:
+        query = query.filter(LabOrder.status == status)
+    if q:
+        query = query.filter(or_(
+            Doctor.name.ilike(f'%{q}%'),
+            LabOrder.items.any(LabOrderItem.test_name_snapshot.ilike(f'%{q}%')),
+            LabOrder.items.any(LabOrderItem.test_code_snapshot.ilike(f'%{q}%')),
+        ))
+    orders = query.order_by(LabOrder.ordered_at.desc(), LabOrder.id.desc()).all()
+    return render_template('patient_lab_orders.html', orders=orders, status=status, q=q)
+
+
+@patient_bp.route('/laboratory/order/<int:order_id>')
+@login_required
+@role_required('Patient')
+def lab_order_detail(order_id):
+    order = LabOrder.query.get_or_404(order_id)
+    if order.patient_id != current_user.id:
+        abort(403)
+    return render_template(
+        'lab_order_detail.html', order=order, viewer_role='Patient',
+        back_url=url_for('patient.laboratory'), statuses=(), interpretations=(),
+        transition_url=None, results_url=None, cancel_url=None,
     )
 
 

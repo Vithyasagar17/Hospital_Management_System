@@ -147,3 +147,15 @@ python -m pytest -q
 - Admission/transfer/discharge audit logging and notifications
 
 See `PHASE6_UPGRADE_NOTES.md` for the Phase 6A, 6B.1 and 6B.2 demo flows.
+
+### Phase 6C laboratory management
+
+- Admin-managed laboratory test catalog with specimen/reference metadata and base pricing
+- Multi-test diagnostic orders linked to outpatient appointments or inpatient admissions
+- Routine/Urgent/STAT priority and sequential sample-processing workflow
+- Unique specimen/barcode tracking and collection notes
+- Structured result values, reference ranges, interpretations and result notes
+- Doctor ordering restricted to established doctor-patient relationships
+- Patient result portal plus Doctor/Admin laboratory workspaces
+- Result-ready notifications, audit logging, and historical test-definition snapshots
+- Additive schema upgrade with no database reset

@@ -144,4 +144,10 @@ def ensure_phase6_schema():
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_admission_active_bed_unique "
         "ON admission(bed_id) WHERE status = 'Active'"
     ))
+
+    # Phase 6C: laboratory catalog, multi-test orders and structured results.
+    from app.models import LabTest, LabOrder, LabOrderItem
+    LabTest.__table__.create(bind=db.engine, checkfirst=True)
+    LabOrder.__table__.create(bind=db.engine, checkfirst=True)
+    LabOrderItem.__table__.create(bind=db.engine, checkfirst=True)
     db.session.commit()

@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, abort, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 from app.routes.auth_decorator import role_required
-from app.models import Doctor, Patient, Appointment, Prescription, PrescriptionItem, DoctorAvailability, AppointmentReminder, WaitlistEntry, Admission
+from app.models import Doctor, Patient, Appointment, Prescription, PrescriptionItem, DoctorAvailability, AppointmentReminder, WaitlistEntry, Admission, LabOrder, LabOrderItem
 from app import db
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
@@ -10,6 +10,10 @@ from datetime import datetime, timedelta
 from app.waitlist import offer_released_slot
 from app.analytics import build_scheduling_analytics, normalize_window
 from app.inpatient import active_admission_for_patient, admit_patient, available_beds, discharge_admission, transfer_admission
+from app.laboratory import (
+    LAB_ORDER_STATUSES, LAB_PRIORITIES, active_lab_tests, create_lab_order,
+    doctor_patient_ids, lab_order_summary, transition_lab_order,
+)
 
 
 doctor_bp = Blueprint('doctor', __name__, url_prefix='/doctor')
@@ -37,6 +41,10 @@ def doctor_dashboard():
     confirmed_count = base_query.filter_by(status='Confirmed').count()
     completed_count = base_query.filter_by(status='Completed').count()
     active_inpatients = Admission.query.filter_by(doctor_id=current_user.id, status='Active').count()
+    open_lab_orders = LabOrder.query.filter(
+        LabOrder.doctor_id == current_user.id,
+        LabOrder.status.in_(['Ordered', 'Sample Collected', 'Processing'])
+    ).count()
 
     upcoming = base_query.filter(
         Appointment.date >= datetime.now(),
@@ -58,7 +66,7 @@ def doctor_dashboard():
         'doctor_dashboard.html', doctor=doctor, doctor_name=doctor_name, needs_profile=needs_profile,
         today_appointments=today_appointments, pending_count=pending_count,
         confirmed_count=confirmed_count, completed_count=completed_count,
-        active_inpatients=active_inpatients,
+        active_inpatients=active_inpatients, open_lab_orders=open_lab_orders,
         upcoming=upcoming, chart_labels=chart_labels, chart_values=chart_values
     )
 
@@ -330,6 +338,137 @@ def appointment_detail(appointment_id):
         'appointment_detail.html', appointment=appointment, prescription=prescription,
         viewer_role='Doctor', now=datetime.now(), current_reminders=current_reminders
     )
+
+
+
+@doctor_bp.route('/laboratory')
+@login_required
+@role_required('Doctor')
+def laboratory():
+    status = request.args.get('status', 'all')
+    priority = request.args.get('priority', 'all')
+    q = request.args.get('q', '').strip()
+    query = LabOrder.query.join(Patient, LabOrder.patient_id == Patient.id).filter(
+        LabOrder.doctor_id == current_user.id
+    )
+    if status in LAB_ORDER_STATUSES:
+        query = query.filter(LabOrder.status == status)
+    if priority in LAB_PRIORITIES:
+        query = query.filter(LabOrder.priority == priority)
+    if q:
+        query = query.filter(or_(
+            Patient.name.ilike(f'%{q}%'),
+            LabOrder.items.any(LabOrderItem.test_name_snapshot.ilike(f'%{q}%')),
+            LabOrder.items.any(LabOrderItem.test_code_snapshot.ilike(f'%{q}%')),
+        ))
+    orders = query.order_by(LabOrder.ordered_at.desc(), LabOrder.id.desc()).all()
+    summary = lab_order_summary(LabOrder.query.filter_by(doctor_id=current_user.id))
+    return render_template(
+        'doctor_lab_orders.html', orders=orders, summary=summary, status=status,
+        priority=priority, q=q, statuses=LAB_ORDER_STATUSES, priorities=LAB_PRIORITIES,
+    )
+
+
+@doctor_bp.route('/laboratory/order/new', methods=['GET', 'POST'])
+@login_required
+@role_required('Doctor')
+def new_lab_order():
+    patient_id = request.form.get('patient_id', type=int) if request.method == 'POST' else request.args.get('patient_id', type=int)
+    appointment_id = request.form.get('appointment_id', type=int) if request.method == 'POST' else request.args.get('appointment_id', type=int)
+    admission_id = request.form.get('admission_id', type=int) if request.method == 'POST' else request.args.get('admission_id', type=int)
+
+    allowed_ids = doctor_patient_ids(current_user.id)
+    patients = Patient.query.filter(Patient.id.in_(allowed_ids), Patient.is_blacklisted.is_(False)).order_by(Patient.name).all() if allowed_ids else []
+    selected_patient = db.session.get(Patient, patient_id) if patient_id else None
+    if selected_patient and selected_patient.id not in allowed_ids:
+        abort(403)
+
+    source_appointment = db.session.get(Appointment, appointment_id) if appointment_id else None
+    if source_appointment and (source_appointment.doctor_id != current_user.id or source_appointment.patient_id != patient_id):
+        abort(403)
+    source_admission = db.session.get(Admission, admission_id) if admission_id else None
+    if source_admission and (source_admission.doctor_id != current_user.id or source_admission.patient_id != patient_id):
+        abort(403)
+
+    if request.method == 'POST':
+        if not patient_id or patient_id not in allowed_ids:
+            abort(403)
+        try:
+            order = create_lab_order(
+                patient_id=patient_id,
+                doctor_id=current_user.id,
+                test_ids=request.form.getlist('test_ids'),
+                priority=request.form.get('priority', 'Routine'),
+                clinical_notes=request.form.get('clinical_notes'),
+                appointment_id=appointment_id,
+                admission_id=admission_id,
+            )
+            patient_name = order.patient.name or f'Patient #{order.patient_id}'
+            test_names = ', '.join(item.test_name_snapshot for item in order.items)
+            log_activity(
+                'lab_order_created',
+                f'Ordered {test_names} for {patient_name}; priority {order.priority}.',
+                'LabOrder', order.id,
+            )
+            notify_user(
+                order.patient_id,
+                'Laboratory tests ordered',
+                f'Dr. {order.doctor.name or current_user.username} ordered {len(order.items)} lab test(s).',
+                'info', f'/patient/laboratory/order/{order.id}',
+            )
+            db.session.commit()
+            flash('Laboratory order created.', 'success')
+            return redirect(url_for('doctor.lab_order_detail', order_id=order.id))
+        except PermissionError:
+            db.session.rollback()
+            abort(403)
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'warning')
+
+    return render_template(
+        'doctor_new_lab_order.html', patients=patients, selected_patient=selected_patient,
+        tests=active_lab_tests(), priorities=LAB_PRIORITIES,
+        appointment_id=appointment_id, admission_id=admission_id,
+        source_appointment=source_appointment, source_admission=source_admission,
+    )
+
+
+@doctor_bp.route('/laboratory/order/<int:order_id>')
+@login_required
+@role_required('Doctor')
+def lab_order_detail(order_id):
+    order = LabOrder.query.get_or_404(order_id)
+    if order.doctor_id != current_user.id:
+        abort(403)
+    return render_template(
+        'lab_order_detail.html', order=order, viewer_role='Doctor',
+        back_url=url_for('doctor.laboratory'), statuses=LAB_ORDER_STATUSES,
+        interpretations=(), transition_url=None, results_url=None,
+        cancel_url=url_for('doctor.cancel_lab_order', order_id=order.id),
+    )
+
+
+@doctor_bp.route('/laboratory/order/<int:order_id>/cancel', methods=['POST'])
+@login_required
+@role_required('Doctor')
+def cancel_lab_order(order_id):
+    order = LabOrder.query.get_or_404(order_id)
+    if order.doctor_id != current_user.id:
+        abort(403)
+    if order.status != 'Ordered':
+        flash('Only an order that has not started sample collection can be cancelled by the ordering doctor.', 'warning')
+        return redirect(url_for('doctor.lab_order_detail', order_id=order.id))
+    try:
+        transition_lab_order(order, 'Cancelled', cancelled_reason=request.form.get('cancelled_reason'))
+        log_activity('lab_order_cancelled', f'Cancelled lab order #{order.id}.', 'LabOrder', order.id)
+        notify_user(order.patient_id, 'Lab order cancelled', f'Lab order #{order.id} was cancelled by your doctor. Reason: {order.cancelled_reason}', 'warning', f'/patient/laboratory/order/{order.id}')
+        db.session.commit()
+        flash('Laboratory order cancelled.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('doctor.lab_order_detail', order_id=order.id))
 
 
 @doctor_bp.route('/prescriptions')
