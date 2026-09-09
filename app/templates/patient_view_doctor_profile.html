@@ -3,26 +3,23 @@
 {% block page_title %}Doctor profile{% endblock %}
 {% block content %}
 <div class="container mt-4">
-  <div class="page-header"><div><h2 class="page-title">Doctor profile</h2><p class="page-subtitle">Review the doctor's clinical specialization before booking.</p></div></div>
+  <div class="page-header"><div><h2 class="page-title">Doctor profile</h2><p class="page-subtitle">Review the doctor's specialization and hospital department before booking.</p></div></div>
   <div class="card hms-profile-card">
     <div class="card-body p-4">
       <div class="hms-profile-head">
         <div class="hms-profile-icon"><i class="bi bi-person-badge"></i></div>
-        <div class="flex-grow-1">
-          <h3 class="mb-1" style="font-size:1.25rem;">Dr. {{ doctor.name }}</h3>
-          <div class="text-muted" style="font-size:.8rem;">{{ doctor.specialization.name if doctor.specialization else 'General clinical profile' }}</div>
-        </div>
+        <div class="flex-grow-1"><h3 class="mb-1" style="font-size:1.25rem;">Dr. {{ doctor.name }}</h3><div class="text-muted" style="font-size:.8rem;">{{ doctor.specialization.name if doctor.specialization else 'General clinical profile' }}</div></div>
         <span class="badge bg-success">Active</span>
       </div>
       <div class="hms-detail-list">
         <div class="hms-detail-row"><strong>Doctor ID</strong><span>{{ doctor.id }}</span></div>
         <div class="hms-detail-row"><strong>Specialization</strong><span>{{ doctor.specialization.name if doctor.specialization else 'Not specified' }}</span></div>
-        {% if doctor.specialization %}<div class="hms-detail-row"><strong>Department</strong><span>{{ doctor.specialization.description or '—' }}</span></div>{% endif %}
+        <div class="hms-detail-row"><strong>Department</strong><span>{{ doctor.department.name if doctor.department else 'Not assigned' }}</span></div>
+        <div class="hms-detail-row"><strong>Consultation fee</strong><span>{% if doctor.consultation_fee is not none %}₹{{ '%.2f'|format(doctor.consultation_fee) }}{% else %}Not configured{% endif %}</span></div>
+        {% if doctor.department and doctor.department.location %}<div class="hms-detail-row"><strong>Department location</strong><span>{{ doctor.department.location }}</span></div>{% endif %}
+        {% if doctor.department and doctor.department.head_doctor %}<div class="hms-detail-row"><strong>Department head</strong><span>Dr. {{ doctor.department.head_doctor.name }}</span></div>{% endif %}
       </div>
-      <div class="d-flex flex-wrap gap-2 mt-4">
-        <a href="{{ url_for('patient.book_appointment') }}" class="btn btn-primary"><i class="bi bi-calendar2-plus me-1"></i> Book appointment</a>
-        <a href="{{ url_for('patient.search_doctors') }}" class="btn btn-outline-primary"><i class="bi bi-arrow-left me-1"></i> Back to search</a>
-      </div>
+      <div class="d-flex flex-wrap gap-2 mt-4"><a href="{{ url_for('patient.book_appointment', doctor_id=doctor.id) }}" class="btn btn-primary"><i class="bi bi-calendar2-plus me-1"></i> Book appointment</a><a href="{{ url_for('patient.search_doctors') }}" class="btn btn-outline-primary"><i class="bi bi-arrow-left me-1"></i> Back to search</a></div>
     </div>
   </div>
 </div>

@@ -1,0 +1,48 @@
+{% extends 'layout.html' %}
+{% block title %}Admission #{{ admission.id }}{% endblock %}
+{% block page_title %}Inpatient admission{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="hms-kicker">Admission #{{ admission.id }} · {{ admission.department.name }}</span><h2 class="page-title">{{ admission.patient.name or ('Patient #' ~ admission.patient_id) }}</h2><p class="page-subtitle">Admitted {{ admission.admitted_at.strftime('%d %b %Y · %I:%M %p') }} under Dr. {{ admission.doctor.name or admission.doctor_id }}.</p></div><div class="d-flex align-items-center gap-2 flex-wrap"><span class="badge fs-6 {{ 'bg-success' if admission.status == 'Active' else 'bg-secondary' }}">{{ admission.status }}</span>{% if viewer_role == 'Doctor' %}<a href="{{ url_for('doctor.new_lab_order', patient_id=admission.patient_id, admission_id=admission.id) }}" class="btn btn-primary btn-sm"><i class="bi bi-clipboard2-pulse me-1"></i> Order lab tests</a>{% endif %}<a href="{{ back_url }}" class="btn btn-outline-secondary">Back</a></div></div>
+
+<div class="row g-4">
+  <div class="col-xl-8">
+    <section class="hms-panel mb-4">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Current placement</span><h3>{{ admission.ward.name }} · Bed {{ admission.bed.bed_number }}</h3></div><i class="bi bi-hospital"></i></div>
+      <div class="hms-detail-list">
+        <div class="hms-detail-row"><strong>Department</strong><span>{{ admission.department.name }}</span></div>
+        <div class="hms-detail-row"><strong>Ward</strong><span>{{ admission.ward.name }} · {{ admission.ward.ward_type }}</span></div>
+        <div class="hms-detail-row"><strong>Bed</strong><span>{{ admission.bed.bed_number }}</span></div>
+        <div class="hms-detail-row"><strong>Admitting doctor</strong><span>Dr. {{ admission.doctor.name or admission.doctor_id }}</span></div>
+        <div class="hms-detail-row"><strong>Admitted</strong><span>{{ admission.admitted_at.strftime('%d %b %Y · %I:%M %p') }}</span></div>
+        {% if admission.discharged_at %}<div class="hms-detail-row"><strong>Discharged</strong><span>{{ admission.discharged_at.strftime('%d %b %Y · %I:%M %p') }}</span></div>{% endif %}
+      </div>
+      <div class="hms-clinical-block mt-4"><span>Admission reason</span><p>{{ admission.reason }}</p></div>
+      <div class="hms-clinical-block"><span>Working diagnosis</span><p>{{ admission.diagnosis or 'No diagnosis recorded.' }}</p></div>
+      {% if admission.discharge_summary %}<div class="hms-clinical-block"><span>Discharge summary</span><p>{{ admission.discharge_summary }}</p></div>{% endif %}
+    </section>
+
+    <section class="hms-panel">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Movement history</span><h3>Bed transfers</h3></div><i class="bi bi-arrow-left-right"></i></div>
+      {% if transfers %}<div class="hms-activity-list">{% for t in transfers %}<div class="hms-activity-item"><span class="hms-activity-icon"><i class="bi bi-arrow-left-right"></i></span><div class="flex-grow-1"><strong>{{ t.from_ward.name }} / {{ t.from_bed.bed_number }} → {{ t.to_ward.name }} / {{ t.to_bed.bed_number }}</strong><small>{{ t.transferred_at.strftime('%d %b %Y · %I:%M %p') }}{% if t.reason %} · {{ t.reason }}{% endif %}</small></div></div>{% endfor %}</div>{% else %}<div class="hms-empty py-3"><i class="bi bi-arrow-left-right"></i>No bed transfers recorded.</div>{% endif %}
+    </section>
+  </div>
+
+  <div class="col-xl-4">
+    {% if viewer_role in ['Admin','Doctor'] and admission.status == 'Active' %}
+    <section class="hms-panel mb-4">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Placement</span><h3>Transfer bed</h3></div><i class="bi bi-arrow-left-right"></i></div>
+      <form method="POST" action="{{ transfer_url }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><div class="mb-3"><label class="form-label">Destination</label><select name="bed_id" class="form-select" required><option value="">Choose available bed</option>{% for bed in transfer_beds %}<option value="{{ bed.id }}">{{ bed.ward.name }} · {{ bed.bed_number }} · {{ bed.ward.ward_type }}</option>{% endfor %}</select></div><div class="mb-3"><label class="form-label">Transfer reason</label><input name="reason" class="form-control" maxlength="500" placeholder="Clinical / operational reason"></div><button class="btn btn-outline-primary w-100" {% if not transfer_beds %}disabled{% endif %}>Transfer patient</button></form>
+    </section>
+
+    <section class="hms-panel">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Close stay</span><h3>Discharge</h3></div><i class="bi bi-box-arrow-right"></i></div>
+      <form method="POST" action="{{ discharge_url }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><div class="mb-3"><label class="form-label">Discharge summary</label><textarea name="summary" class="form-control" required placeholder="Condition at discharge, plan, follow-up instructions..."></textarea></div><button class="btn btn-outline-danger w-100" onclick="return confirm('Discharge this patient and release the bed?')">Discharge patient</button></form>
+    </section>
+    {% elif viewer_role == 'Admin' and admission.status == 'Discharged' %}
+    <section class="hms-panel"><div class="hms-panel-head"><div><span class="hms-kicker">Financial closeout</span><h3>Generate inpatient invoice</h3></div><i class="bi bi-receipt-cutoff"></i></div><p class="text-muted small">Create a draft using ward/day charges and completed laboratory tests linked to this stay.</p><a class="btn btn-primary w-100" href="{{ url_for('admin.new_invoice', admission_id=admission.id) }}">Generate invoice</a></section>
+    {% elif viewer_role == 'Patient' and admission.status == 'Active' %}
+    <section class="hms-panel"><div class="hms-panel-head"><div><span class="hms-kicker">Current stay</span><h3>You are currently admitted</h3></div><i class="bi bi-heart-pulse"></i></div><p class="text-muted small mb-0">Your ward and bed placement shown here reflects the latest inpatient assignment recorded by the hospital.</p></section>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

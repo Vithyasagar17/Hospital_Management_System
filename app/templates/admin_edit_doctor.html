@@ -1,31 +1,14 @@
 {% extends 'layout.html' %}
-
 {% block title %}Edit doctor{% endblock %}
 {% block page_title %}Edit doctor{% endblock %}
 {% block content %}
-<div class="container mt-4">
-  <h2>Edit Doctor</h2>
-
-  <form method="POST" class="mt-4"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-    <div class="form-group mb-3">
-      <label for="name" class="form-label">Full Name</label>
-      <input type="text" class="form-control" id="name" name="name" value="{{ doctor.name or '' }}" required>
-    </div>
-
-    <div class="form-group mb-3">
-      <label for="specialization_id" class="form-label">Specialization</label>
-      <select class="form-control" id="specialization_id" name="specialization_id">
-        <option value="">-- Select Specialization --</option>
-        {% for spec in specializations %}
-        <option value="{{ spec.id }}" {% if doctor.specialization_id == spec.id %}selected{% endif %}>{{ spec.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <div class="form-group">
-      <button type="submit" class="btn btn-primary">Update Doctor</button>
-      <a href="{{ url_for('admin.admin_doctors') }}" class="btn btn-secondary">Cancel</a>
-    </div>
-  </form>
+<div class="container mt-4" style="max-width:820px;">
+  <div class="page-header"><div><span class="hms-kicker">Staff administration</span><h2 class="page-title">Edit Dr. {{ doctor.name or 'Doctor' }}</h2><p class="page-subtitle">Update professional details and department assignment.</p></div></div>
+  <div class="hms-panel"><form method="POST"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3"><label for="name" class="form-label">Full name</label><input type="text" class="form-control" id="name" name="name" value="{{ doctor.name or '' }}" required></div>
+    <div class="row g-3"><div class="col-md-6"><label for="specialization_id" class="form-label">Specialization</label><select class="form-select" id="specialization_id" name="specialization_id"><option value="">No specialization assigned</option>{% for spec in specializations %}<option value="{{ spec.id }}" {% if doctor.specialization_id == spec.id %}selected{% endif %}>{{ spec.name }}</option>{% endfor %}</select></div><div class="col-md-6"><label for="department_id" class="form-label">Department</label><select class="form-select" id="department_id" name="department_id"><option value="">Unassigned</option>{% for department in departments %}<option value="{{ department.id }}" {% if doctor.department_id == department.id %}selected{% endif %} {% if not department.is_active and doctor.department_id != department.id %}disabled{% endif %}>{{ department.name }} · {{ department.code }}{% if not department.is_active %} · inactive{% endif %}</option>{% endfor %}</select><div class="form-text">Moving a department head to another department automatically clears the old head assignment.</div></div></div>
+    <div class="mt-3"><label class="form-label">Consultation fee (₹)</label><input name="consultation_fee" type="number" min="0" step="0.01" class="form-control" value="{{ doctor.consultation_fee if doctor.consultation_fee is not none else '' }}"><div class="form-text">Completed appointments use this fee when a draft invoice is generated.</div></div>
+    <div class="d-flex gap-2 mt-4"><button type="submit" class="btn btn-primary"><i class="bi bi-check2 me-1"></i>Update doctor</button><a href="{{ url_for('admin.admin_doctors') }}" class="btn btn-outline-primary">Cancel</a></div>
+  </form></div>
 </div>
 {% endblock %}

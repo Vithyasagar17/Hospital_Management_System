@@ -105,3 +105,72 @@ def ensure_phase5_schema():
         "WHERE status IN ('Waiting', 'Offered')"
     ))
     db.session.commit()
+
+
+
+def ensure_phase6_schema():
+    """Add Phase 6 hospital operations structure without resetting Phase 5 data."""
+    inspector = inspect(db.engine)
+    fresh_database = not inspector.has_table('user')
+
+    if fresh_database:
+        db.create_all()
+        return
+
+    ensure_phase5_schema()
+
+    from app.models import Department, Ward, Bed
+    Department.__table__.create(bind=db.engine, checkfirst=True)
+    _add_columns('doctor', {
+        'department_id': 'INTEGER REFERENCES department(id)',
+    })
+    db.session.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_doctor_department_id ON doctor(department_id)"
+    ))
+
+    # Phase 6B.1: inpatient capacity infrastructure.
+    Ward.__table__.create(bind=db.engine, checkfirst=True)
+    Bed.__table__.create(bind=db.engine, checkfirst=True)
+
+    # Phase 6B.2: admissions, transfer history and discharge workflow.
+    from app.models import Admission, BedTransfer
+    Admission.__table__.create(bind=db.engine, checkfirst=True)
+    BedTransfer.__table__.create(bind=db.engine, checkfirst=True)
+    db.session.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_admission_active_patient_unique "
+        "ON admission(patient_id) WHERE status = 'Active'"
+    ))
+    db.session.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_admission_active_bed_unique "
+        "ON admission(bed_id) WHERE status = 'Active'"
+    ))
+
+    # Phase 6C: laboratory catalog, multi-test orders and structured results.
+    from app.models import LabTest, LabOrder, LabOrderItem
+    LabTest.__table__.create(bind=db.engine, checkfirst=True)
+    LabOrder.__table__.create(bind=db.engine, checkfirst=True)
+    LabOrderItem.__table__.create(bind=db.engine, checkfirst=True)
+
+    # Phase 6D: billing rates, historical price snapshots, invoices and payments.
+    _add_columns('doctor', {
+        'consultation_fee': 'NUMERIC(10, 2)',
+    })
+    _add_columns('ward', {
+        'daily_rate': 'NUMERIC(10, 2)',
+    })
+    _add_columns('admission', {
+        'room_rate_snapshot': 'NUMERIC(10, 2)',
+    })
+    _add_columns('bed_transfer', {
+        'from_daily_rate_snapshot': 'NUMERIC(10, 2)',
+        'to_daily_rate_snapshot': 'NUMERIC(10, 2)',
+    })
+    _add_columns('lab_order_item', {
+        'price_snapshot': 'NUMERIC(10, 2)',
+    })
+    from app.models import BillingService, Invoice, InvoiceItem, Payment
+    BillingService.__table__.create(bind=db.engine, checkfirst=True)
+    Invoice.__table__.create(bind=db.engine, checkfirst=True)
+    InvoiceItem.__table__.create(bind=db.engine, checkfirst=True)
+    Payment.__table__.create(bind=db.engine, checkfirst=True)
+    db.session.commit()

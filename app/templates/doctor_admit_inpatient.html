@@ -1,0 +1,14 @@
+{% extends 'layout.html' %}
+{% block title %}Admit patient{% endblock %}
+{% block page_title %}Admit patient{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="hms-kicker">{{ doctor.department.code if doctor.department else 'Department' }} · Inpatient intake</span><h2 class="page-title">Create inpatient admission</h2><p class="page-subtitle">Admission is restricted to patients you have treated and beds in your assigned department.</p></div><a href="{{ url_for('doctor.inpatients') }}" class="btn btn-outline-secondary">Back to inpatients</a></div>
+<div class="row justify-content-center"><div class="col-xl-8"><div class="hms-panel"><div class="hms-panel-head"><div><span class="hms-kicker">Clinical placement</span><h3>{{ doctor.department.name if doctor.department else 'Department required' }}</h3></div><i class="bi bi-hospital"></i></div>
+<form method="POST"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">{% if selected_appointment_id %}<input type="hidden" name="appointment_id" value="{{ selected_appointment_id }}">{% endif %}
+<div class="mb-3"><label class="form-label">Patient</label><select name="patient_id" class="form-select" required><option value="">Choose patient</option>{% for p in patients %}<option value="{{ p.id }}" {% if selected_patient_id == p.id %}selected{% endif %}>{{ p.name or ('Patient #' ~ p.id) }}</option>{% endfor %}</select></div>
+<div class="mb-3"><label class="form-label">Available bed</label><select name="bed_id" class="form-select" required><option value="">Choose available bed</option>{% for bed in beds %}<option value="{{ bed.id }}">{{ bed.ward.name }} · {{ bed.bed_number }} · {{ bed.ward.ward_type }}</option>{% endfor %}</select>{% if not beds %}<div class="form-text text-danger">No available beds in {{ doctor.department.name }}.</div>{% endif %}</div>
+<div class="mb-3"><label class="form-label">Admission reason</label><textarea name="reason" class="form-control" required placeholder="Clinical reason requiring inpatient care"></textarea></div>
+<div class="mb-3"><label class="form-label">Working diagnosis</label><textarea name="diagnosis" class="form-control" placeholder="Optional diagnosis / provisional diagnosis"></textarea></div>
+<button class="btn btn-primary w-100" {% if not beds or not patients %}disabled{% endif %}><i class="bi bi-person-plus me-1"></i>Create admission</button>
+</form></div></div></div>
+{% endblock %}

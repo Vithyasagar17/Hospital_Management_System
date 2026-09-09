@@ -104,3 +104,72 @@ Before deployment, set a long random `HMS_SECRET_KEY`, serve the app only over H
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
+
+
+## Phase 5 smart scheduling
+
+- Patient appointment rescheduling with conflict-safe slot validation
+- No-show workflow and status analytics
+- 24-hour and 2-hour idempotent appointment reminders
+- Waitlist queue with temporary released-slot offers and patient claim flow
+- Scheduling intelligence for no-shows, reminders, waitlist conversion and doctor utilization
+
+## Phase 6 hospital operations
+
+- First-class department records with code, description, location and active/inactive state
+- Administrator-controlled doctor-to-department assignment
+- Department-head assignment restricted to active doctors in the same department
+- Safe reassignment rules that clear stale department-head relationships
+- Department directory and department detail dashboards
+- Department metrics for doctor count, unique patients, appointments, 30-day volume and workflow status
+- Patient doctor discovery by department in addition to specialization
+- Department context in doctor profiles, booking, and patient-facing doctor profiles
+- Additive schema upgrade; existing Phase 5 data is preserved
+
+### Phase 6B.1 wards & beds
+
+- Department-linked ward directory with General, ICU, Private, Emergency and custom ward types
+- Ward activation/deactivation and operational location metadata
+- Bed inventory with Available, Reserved, Occupied and Maintenance states
+- Duplicate bed and ward protection plus audit logging
+- Hospital-wide and department-level bed-capacity metrics
+- Admin dashboard occupancy and available-bed visibility
+- Safety rules that reserve `Occupied` state for the upcoming admission workflow
+- Additive schema upgrade with no database reset
+
+### Phase 6B.2 admissions, transfers & discharge
+
+- Inpatient admission records linked to patient, doctor, department, ward and bed
+- Automatic bed occupation/release on admission, transfer and discharge
+- Bed-transfer history with non-destructive movement tracking
+- Admin and Doctor inpatient workspaces plus Patient hospital-stay history
+- One-active-admission-per-patient and one-active-patient-per-bed concurrency safeguards
+- Admission/transfer/discharge audit logging and notifications
+
+See `PHASE6_UPGRADE_NOTES.md` for the Phase 6A, 6B.1 and 6B.2 demo flows.
+
+### Phase 6C laboratory management
+
+- Admin-managed laboratory test catalog with specimen/reference metadata and base pricing
+- Multi-test diagnostic orders linked to outpatient appointments or inpatient admissions
+- Routine/Urgent/STAT priority and sequential sample-processing workflow
+- Unique specimen/barcode tracking and collection notes
+- Structured result values, reference ranges, interpretations and result notes
+- Doctor ordering restricted to established doctor-patient relationships
+- Patient result portal plus Doctor/Admin laboratory workspaces
+- Result-ready notifications, audit logging, and historical test-definition snapshots
+- Additive schema upgrade with no database reset
+
+### Phase 6D billing & invoicing
+
+- Doctor consultation fees and ward daily rates as configurable billable rates
+- Billing service/charge catalog for reusable procedures, supplies, and other services
+- Draft invoices generated from completed appointments or discharged inpatient stays
+- Automatic consultation, laboratory, and inpatient room/bed charge import
+- Historical price snapshots so later catalog/rate edits do not rewrite old financial records
+- Draft discounts, due dates, notes, manual charges, and catalog service charges
+- Invoice lifecycle: Draft, Issued, Partially Paid, Paid, and controlled Void
+- Payment ledger for Cash, Card, UPI, Bank Transfer, Insurance, and Other methods
+- Patient bills/payment portal, outstanding-balance visibility, notifications, and printable invoices
+- Admin receivables dashboard for outstanding value, 30-day collections, issued value, unpaid bills, and drafts
+- Additive schema upgrade with no database reset

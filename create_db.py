@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timedelta
 from app import create_app, db
-from app.models import User, Specialization, Doctor, Patient, DoctorAvailability, Appointment, Prescription, PrescriptionItem, Notification, AuditLog
+from app.models import User, Specialization, Department, Doctor, Patient, DoctorAvailability, Appointment, Prescription, PrescriptionItem, Notification, AuditLog, LabTest, BillingService
 
 app = create_app()
 
@@ -96,6 +96,54 @@ with app.app_context():
 
     db.session.commit()
 
+    # Phase 6A hospital departments. These are organizational units;
+    # specializations remain the doctor's clinical discipline.
+    departments_list = [
+        ('General Medicine', 'GEN', 'Primary medical care and general inpatient/outpatient services', 'Block A · Floor 1'),
+        ('Cardiology', 'CARD', 'Cardiovascular consultation and specialty care', 'Block B · Floor 2'),
+        ('Neurology', 'NEURO', 'Neurological consultation and nervous-system care', 'Block B · Floor 3'),
+        ('Orthopedics', 'ORTHO', 'Bone, joint, trauma and musculoskeletal services', 'Block C · Floor 1'),
+        ('Pediatrics', 'PEDS', 'Child and adolescent healthcare services', 'Block A · Floor 2'),
+        ('Emergency Medicine', 'ER', 'Emergency assessment and stabilization', 'Emergency Wing'),
+    ]
+    for department_name, code, description, location in departments_list:
+        if not Department.query.filter_by(code=code).first():
+            db.session.add(Department(
+                name=department_name, code=code, description=description,
+                location=location, is_active=True,
+            ))
+    db.session.commit()
+
+    # Phase 6C laboratory catalog used by the diagnostic ordering workflow.
+    lab_tests = [
+        ('CBC', 'Complete Blood Count', 'Hematology', 'Whole blood', None, None, 350.00, 6),
+        ('FBS', 'Fasting Blood Sugar', 'Biochemistry', 'Plasma', 'mg/dL', '70-99', 180.00, 4),
+        ('HBA1C', 'HbA1c', 'Biochemistry', 'Whole blood', '%', '4.0-5.6', 650.00, 12),
+        ('LIPID', 'Lipid Profile', 'Biochemistry', 'Serum', 'mg/dL', None, 850.00, 12),
+        ('TSH', 'Thyroid Stimulating Hormone', 'Endocrinology', 'Serum', 'mIU/L', '0.4-4.0', 700.00, 18),
+        ('CRP', 'C-Reactive Protein', 'Immunology', 'Serum', 'mg/L', '< 10', 500.00, 8),
+    ]
+    for code, name, category, specimen, unit, reference, price, tat in lab_tests:
+        if not LabTest.query.filter_by(code=code).first():
+            db.session.add(LabTest(
+                code=code, name=name, category=category, specimen_type=specimen,
+                default_unit=unit, reference_range=reference, base_price=price,
+                turnaround_hours=tat, is_active=True,
+            ))
+    db.session.commit()
+
+    # Phase 6D reusable billing/charge catalog.
+    billing_services = [
+        ('ECG', '12-lead ECG', 'Procedure', 450.00),
+        ('NEB', 'Nebulization', 'Procedure', 300.00),
+        ('DRESS', 'Wound dressing', 'Nursing', 250.00),
+        ('AMB', 'Ambulance service', 'Transport', 1200.00),
+    ]
+    for code, name, category, price in billing_services:
+        if not BillingService.query.filter_by(code=code).first():
+            db.session.add(BillingService(code=code, name=name, category=category, unit_price=price, is_active=True))
+    db.session.commit()
+
     if not User.query.filter_by(username='dr_sample').first():
         doctor_user = User(username='dr_sample', email='doctor@medora.local', email_verified=True, role='Doctor')
         doctor_user.set_password('doctorpass')
@@ -103,9 +151,18 @@ with app.app_context():
         db.session.commit()
 
         gen_med = Specialization.query.filter_by(name='General Medicine').first()
-        doctor = Doctor(id=doctor_user.id, name='Alice Smith', specialization_id=gen_med.id if gen_med else None)
+        gen_dept = Department.query.filter_by(code='GEN').first()
+        doctor = Doctor(
+            id=doctor_user.id, name='Alice Smith',
+            specialization_id=gen_med.id if gen_med else None,
+            department_id=gen_dept.id if gen_dept else None,
+            consultation_fee=500.00,
+        )
         db.session.add(doctor)
         db.session.commit()
+        if gen_dept and not gen_dept.head_doctor_id:
+            gen_dept.head_doctor_id = doctor.id
+            db.session.commit()
 
     # Seed demo booking windows for the sample doctor so the live-slot workflow
     # is immediately usable after recreating the database.

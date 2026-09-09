@@ -1,0 +1,28 @@
+{% extends 'layout.html' %}
+{% block title %}Wards & beds{% endblock %}
+{% block page_title %}Wards & beds{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="hms-kicker">Inpatient infrastructure</span><h2 class="page-title">Ward directory</h2><p class="page-subtitle">Organize inpatient capacity by department, ward type and operational bed state.</p></div></div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-4">
+    <div class="hms-panel h-100">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Create capacity</span><h3>Add ward</h3></div><i class="bi bi-hospital"></i></div>
+      <form method="POST"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3"><label class="form-label">Department</label><select name="department_id" class="form-select" required><option value="">Choose active department</option>{% for d in departments %}<option value="{{ d.id }}">{{ d.code }} · {{ d.name }}</option>{% endfor %}</select></div>
+        <div class="row g-3"><div class="col-md-8"><label class="form-label">Ward name</label><input name="name" class="form-control" maxlength="120" placeholder="Cardiac ICU" required></div><div class="col-md-4"><label class="form-label">Code</label><input name="code" class="form-control text-uppercase" maxlength="30" placeholder="CICU" required></div></div>
+        <div class="row g-3 mt-0"><div class="col-md-6"><label class="form-label">Type</label><select name="ward_type" class="form-select">{% for type in ward_types %}<option value="{{ type }}">{{ type }}</option>{% endfor %}</select></div><div class="col-md-6"><label class="form-label">Location</label><input name="location" class="form-control" maxlength="120" placeholder="Block B · Floor 3"></div></div>
+        <div class="mt-3"><label class="form-label">Daily ward rate (₹)</label><input name="daily_rate" type="number" min="0" step="0.01" class="form-control" placeholder="2500.00"><div class="form-text">Used for inpatient room/bed billing.</div></div>
+        <button class="btn btn-primary w-100 mt-3"><i class="bi bi-plus-circle me-1"></i>Create ward</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-xl-8">
+    <form method="GET" class="hms-filter-panel mb-3"><div class="row g-3 align-items-end"><div class="col-lg-4"><label class="form-label">Search</label><input name="q" class="form-control" value="{{ q }}" placeholder="Ward, code, location, department..."></div><div class="col-sm-6 col-lg-3"><label class="form-label">Department</label><select name="department_id" class="form-select"><option value="">All departments</option>{% for d in all_departments %}<option value="{{ d.id }}" {% if department_id == d.id %}selected{% endif %}>{{ d.name }}</option>{% endfor %}</select></div><div class="col-sm-6 col-lg-3"><label class="form-label">Status</label><select name="status" class="form-select"><option value="active" {% if status=='active' %}selected{% endif %}>Active</option><option value="inactive" {% if status=='inactive' %}selected{% endif %}>Inactive</option><option value="all" {% if status=='all' %}selected{% endif %}>All</option></select></div><div class="col-lg-2 d-grid"><button class="btn btn-primary">Apply</button></div></div></form>
+
+    <div class="hms-results-summary"><span><strong>{{ rows|length }}</strong> ward{{ '' if rows|length == 1 else 's' }} found</span>{% if q or department_id or status != 'active' %}<a href="{{ url_for('admin.wards') }}">Clear filters</a>{% endif %}</div>
+    {% if rows %}<div class="row g-3">{% for row in rows %}{% set ward=row.ward %}<div class="col-md-6"><article class="hms-panel h-100"><div class="d-flex justify-content-between gap-3 align-items-start"><div><span class="hms-kicker">{{ ward.code }} · {{ ward.ward_type }}</span><h3 class="mt-1 mb-1">{{ ward.name }}</h3><p class="text-muted small mb-2">{{ ward.department.name }}{% if ward.location %} · {{ ward.location }}{% endif %}{% if ward.daily_rate is not none %} · ₹{{ '%.2f'|format(ward.daily_rate) }}/day{% endif %}</p></div><span class="badge {{ 'bg-success' if ward.is_active else 'bg-secondary' }}">{{ 'Active' if ward.is_active else 'Inactive' }}</span></div><div class="row g-2 mt-2 text-center"><div class="col-3"><strong class="d-block">{{ row.capacity }}</strong><small class="text-muted">Beds</small></div><div class="col-3"><strong class="d-block text-success">{{ row.available }}</strong><small class="text-muted">Free</small></div><div class="col-3"><strong class="d-block">{{ row.reserved }}</strong><small class="text-muted">Held</small></div><div class="col-3"><strong class="d-block">{{ row.occupied }}</strong><small class="text-muted">Occupied</small></div></div><a href="{{ url_for('admin.ward_detail', ward_id=ward.id) }}" class="btn btn-outline-primary w-100 mt-3">Manage ward & beds</a></article></div>{% endfor %}</div>{% else %}<div class="hms-empty"><i class="bi bi-hospital"></i><p>No wards match these filters.</p></div>{% endif %}
+  </div>
+</div>
+{% endblock %}

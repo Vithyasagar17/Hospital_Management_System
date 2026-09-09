@@ -1,0 +1,47 @@
+{% extends 'layout.html' %}
+{% block title %}{{ ward.name }}{% endblock %}
+{% block page_title %}Ward operations{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="hms-kicker">{{ ward.code }} · {{ ward.ward_type }} · {{ ward.department.name }}</span><h2 class="page-title">{{ ward.name }}</h2><p class="page-subtitle">{{ ward.location or 'Hospital location not specified' }} · Manage ward metadata and operational bed inventory.</p></div><div class="d-flex gap-2"><a href="{{ url_for('admin.wards') }}" class="btn btn-outline-secondary">All wards</a><span class="badge fs-6 {{ 'bg-success' if ward.is_active else 'bg-secondary' }} align-self-center">{{ 'Active' if ward.is_active else 'Inactive' }}</span></div></div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon primary"><i class="bi bi-grid-3x3-gap"></i></span><div><strong>{{ snapshot.capacity }}</strong><small>Total beds</small></div></div></div>
+  <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon success"><i class="bi bi-check2-circle"></i></span><div><strong>{{ snapshot.available }}</strong><small>Available</small></div></div></div>
+  <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon warning"><i class="bi bi-bookmark-check"></i></span><div><strong>{{ snapshot.reserved }}</strong><small>Reserved</small></div></div></div>
+  <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon info"><i class="bi bi-person-fill"></i></span><div><strong>{{ snapshot.occupied }}</strong><small>Occupied</small></div></div></div>
+  <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon warning"><i class="bi bi-tools"></i></span><div><strong>{{ snapshot.maintenance }}</strong><small>Maintenance</small></div></div></div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-4">
+    <div class="hms-panel mb-4">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Ward configuration</span><h3>Details</h3></div><i class="bi bi-sliders"></i></div>
+      <form method="POST"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3"><label class="form-label">Department</label><select name="department_id" class="form-select" required>{% for d in departments %}<option value="{{ d.id }}" {% if ward.department_id == d.id %}selected{% endif %} {% if not d.is_active and ward.department_id != d.id %}disabled{% endif %}>{{ d.code }} · {{ d.name }}{% if not d.is_active %} · inactive{% endif %}</option>{% endfor %}</select></div>
+        <div class="row g-3"><div class="col-md-8"><label class="form-label">Name</label><input name="name" class="form-control" maxlength="120" value="{{ ward.name }}" required></div><div class="col-md-4"><label class="form-label">Code</label><input name="code" class="form-control text-uppercase" maxlength="30" value="{{ ward.code }}" required></div></div>
+        <div class="row g-3 mt-0"><div class="col-md-6"><label class="form-label">Type</label><select name="ward_type" class="form-select">{% for type in ward_types %}<option value="{{ type }}" {% if ward.ward_type == type %}selected{% endif %}>{{ type }}</option>{% endfor %}</select></div><div class="col-md-6"><label class="form-label">Location</label><input name="location" class="form-control" maxlength="120" value="{{ ward.location or '' }}"></div></div><div class="mt-3"><label class="form-label">Daily ward rate (₹)</label><input name="daily_rate" type="number" min="0" step="0.01" class="form-control" value="{{ ward.daily_rate if ward.daily_rate is not none else '' }}"><div class="form-text">The rate is snapshotted for new admissions and invoices.</div></div>
+        <button class="btn btn-primary w-100 mt-3">Save ward</button>
+      </form>
+      <hr class="my-4">
+      <form method="POST" action="{{ url_for('admin.toggle_ward', ward_id=ward.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">{% if ward.is_active %}<button class="btn btn-outline-danger w-100" {% if snapshot.reserved or snapshot.occupied %}disabled{% endif %} onclick="return confirm('Deactivate this ward?')">Deactivate ward</button>{% if snapshot.reserved or snapshot.occupied %}<div class="form-text mt-2">Release reserved/occupied beds before deactivation.</div>{% endif %}{% else %}<button class="btn btn-success w-100">Reactivate ward</button>{% endif %}</form>
+    </div>
+
+    <div class="hms-panel">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Inventory</span><h3>Add bed</h3></div><i class="bi bi-plus-square"></i></div>
+      <form method="POST" action="{{ url_for('admin.add_bed', ward_id=ward.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3"><label class="form-label">Bed number</label><input name="bed_number" class="form-control text-uppercase" maxlength="30" placeholder="CICU-01" required></div>
+        <div class="mb-3"><label class="form-label">Initial status</label><select name="status" class="form-select">{% for status in bed_statuses %}<option value="{{ status }}">{{ status }}</option>{% endfor %}</select><div class="form-text">Occupied is intentionally unavailable here; admissions will control occupancy.</div></div>
+        <div class="mb-3"><label class="form-label">Notes</label><input name="notes" class="form-control" maxlength="255" placeholder="Ventilator-ready / isolation / equipment notes"></div>
+        <button class="btn btn-primary w-100" {% if not ward.is_active %}disabled{% endif %}>Add bed</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-xl-8">
+    <div class="hms-panel">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Bed board</span><h3>{{ beds|length }} bed{{ '' if beds|length == 1 else 's' }}</h3></div><span class="text-muted small">Occupancy {{ snapshot.occupancy_rate }}%</span></div>
+      {% if beds %}<div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>Bed</th><th>Status</th><th>Notes</th><th>Update</th></tr></thead><tbody>{% for bed in beds %}{% set form_id = 'bed-form-' ~ bed.id %}<tr><td><form id="{{ form_id }}" method="POST" action="{{ url_for('admin.update_bed', bed_id=bed.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"></form><input form="{{ form_id }}" name="bed_number" class="form-control form-control-sm text-uppercase" value="{{ bed.bed_number }}" maxlength="30" {% if bed.status == 'Occupied' %}readonly{% endif %}></td><td>{% if bed.status == 'Occupied' %}<span class="badge bg-primary">Occupied</span>{% set occupant = occupant_by_bed.get(bed.id) %}{% if occupant %}<div class="small mt-1"><a href="{{ url_for('admin.admission_detail', admission_id=occupant.id) }}">{{ occupant.patient.name or ('Patient #' ~ occupant.patient_id) }}</a></div>{% endif %}<input form="{{ form_id }}" type="hidden" name="status" value="Occupied">{% else %}<select form="{{ form_id }}" name="status" class="form-select form-select-sm">{% for status in bed_statuses %}<option value="{{ status }}" {% if bed.status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select>{% endif %}</td><td><input form="{{ form_id }}" name="notes" class="form-control form-control-sm" maxlength="255" value="{{ bed.notes or '' }}" {% if bed.status == 'Occupied' %}readonly{% endif %}></td><td><button form="{{ form_id }}" class="btn btn-sm btn-outline-primary" {% if bed.status == 'Occupied' %}disabled{% endif %}>Save</button></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="hms-empty"><i class="bi bi-grid-3x3-gap"></i><p>No beds created yet.</p></div>{% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

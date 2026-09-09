@@ -33,12 +33,74 @@ class Specialization(db.Model):
     description = db.Column(db.String(255))
 
 
+class Department(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), unique=True, nullable=False)
+    code = db.Column(db.String(20), unique=True, nullable=False)
+    description = db.Column(db.String(500), nullable=True)
+    location = db.Column(db.String(120), nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    head_doctor_id = db.Column(db.Integer, db.ForeignKey('doctor.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+    head_doctor = db.relationship('Doctor', foreign_keys=[head_doctor_id], post_update=True)
+
+
+class Ward(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    department_id = db.Column(db.Integer, db.ForeignKey('department.id'), nullable=False, index=True)
+    name = db.Column(db.String(120), nullable=False)
+    code = db.Column(db.String(30), unique=True, nullable=False)
+    ward_type = db.Column(db.String(30), default='General', nullable=False)
+    location = db.Column(db.String(120), nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    daily_rate = db.Column(db.Numeric(10, 2), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+    department = db.relationship(
+        'Department',
+        backref=db.backref('wards', lazy=True),
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint('department_id', 'name', name='uq_ward_department_name'),
+    )
+
+
+class Bed(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    ward_id = db.Column(db.Integer, db.ForeignKey('ward.id'), nullable=False, index=True)
+    bed_number = db.Column(db.String(30), nullable=False)
+    status = db.Column(db.String(20), default='Available', nullable=False, index=True)
+    notes = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+    ward = db.relationship(
+        'Ward',
+        backref=db.backref('beds', lazy=True),
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint('ward_id', 'bed_number', name='uq_bed_ward_number'),
+    )
+
+
 class Doctor(db.Model):
     id = db.Column(db.Integer, db.ForeignKey('user.id'), primary_key=True)
     name = db.Column(db.String(100))
     specialization_id = db.Column(db.Integer, db.ForeignKey('specialization.id'))
+    department_id = db.Column(db.Integer, db.ForeignKey('department.id'), nullable=True, index=True)
     specialization = db.relationship('Specialization', backref='doctors')
+    department = db.relationship(
+        'Department',
+        foreign_keys=[department_id],
+        backref=db.backref('doctors', lazy=True),
+    )
     is_blacklisted = db.Column(db.Boolean, default=False)
+    consultation_fee = db.Column(db.Numeric(10, 2), nullable=True)
 
 
 class Patient(db.Model):
@@ -74,6 +136,201 @@ class Appointment(db.Model):
     @property
     def active_prescription(self):
         return next((p for p in self.prescriptions if not getattr(p, 'is_deleted', False)), None)
+
+
+class Admission(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    patient_id = db.Column(db.Integer, db.ForeignKey('patient.id'), nullable=False, index=True)
+    doctor_id = db.Column(db.Integer, db.ForeignKey('doctor.id'), nullable=False, index=True)
+    department_id = db.Column(db.Integer, db.ForeignKey('department.id'), nullable=False, index=True)
+    ward_id = db.Column(db.Integer, db.ForeignKey('ward.id'), nullable=False, index=True)
+    bed_id = db.Column(db.Integer, db.ForeignKey('bed.id'), nullable=False, index=True)
+    appointment_id = db.Column(db.Integer, db.ForeignKey('appointment.id'), nullable=True, index=True)
+    admitted_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False, index=True)
+    reason = db.Column(db.Text, nullable=False)
+    diagnosis = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(20), default='Active', nullable=False, index=True)
+    discharged_at = db.Column(db.DateTime, nullable=True)
+    discharge_summary = db.Column(db.Text, nullable=True)
+    room_rate_snapshot = db.Column(db.Numeric(10, 2), nullable=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    discharged_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+    patient = db.relationship('Patient', backref=db.backref('admissions', lazy=True), foreign_keys=[patient_id])
+    doctor = db.relationship('Doctor', backref=db.backref('admissions', lazy=True), foreign_keys=[doctor_id])
+    department = db.relationship('Department', backref=db.backref('admissions', lazy=True), foreign_keys=[department_id])
+    ward = db.relationship('Ward', backref=db.backref('admissions', lazy=True), foreign_keys=[ward_id])
+    bed = db.relationship('Bed', backref=db.backref('admissions', lazy=True), foreign_keys=[bed_id])
+    appointment = db.relationship('Appointment', backref=db.backref('admissions', lazy=True), foreign_keys=[appointment_id])
+    created_by = db.relationship('User', foreign_keys=[created_by_id])
+    discharged_by = db.relationship('User', foreign_keys=[discharged_by_id])
+
+    __table_args__ = (
+        db.Index(
+            'ix_admission_active_patient_unique',
+            'patient_id',
+            unique=True,
+            sqlite_where=text("status = 'Active'"),
+            postgresql_where=text("status = 'Active'"),
+        ),
+        db.Index(
+            'ix_admission_active_bed_unique',
+            'bed_id',
+            unique=True,
+            sqlite_where=text("status = 'Active'"),
+            postgresql_where=text("status = 'Active'"),
+        ),
+    )
+
+
+class BedTransfer(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    admission_id = db.Column(db.Integer, db.ForeignKey('admission.id'), nullable=False, index=True)
+    from_ward_id = db.Column(db.Integer, db.ForeignKey('ward.id'), nullable=False)
+    from_bed_id = db.Column(db.Integer, db.ForeignKey('bed.id'), nullable=False)
+    to_ward_id = db.Column(db.Integer, db.ForeignKey('ward.id'), nullable=False)
+    to_bed_id = db.Column(db.Integer, db.ForeignKey('bed.id'), nullable=False)
+    reason = db.Column(db.String(500), nullable=True)
+    transferred_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False, index=True)
+    transferred_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    from_daily_rate_snapshot = db.Column(db.Numeric(10, 2), nullable=True)
+    to_daily_rate_snapshot = db.Column(db.Numeric(10, 2), nullable=True)
+
+    admission = db.relationship('Admission', backref=db.backref('transfers', lazy=True, cascade='all, delete-orphan'))
+    from_ward = db.relationship('Ward', foreign_keys=[from_ward_id])
+    from_bed = db.relationship('Bed', foreign_keys=[from_bed_id])
+    to_ward = db.relationship('Ward', foreign_keys=[to_ward_id])
+    to_bed = db.relationship('Bed', foreign_keys=[to_bed_id])
+    transferred_by = db.relationship('User', foreign_keys=[transferred_by_id])
+
+
+class LabTest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(30), unique=True, nullable=False, index=True)
+    name = db.Column(db.String(160), unique=True, nullable=False)
+    category = db.Column(db.String(80), nullable=True, index=True)
+    specimen_type = db.Column(db.String(80), nullable=True)
+    default_unit = db.Column(db.String(40), nullable=True)
+    reference_range = db.Column(db.String(120), nullable=True)
+    base_price = db.Column(db.Numeric(10, 2), nullable=True)
+    turnaround_hours = db.Column(db.Integer, nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+
+class LabOrder(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    patient_id = db.Column(db.Integer, db.ForeignKey('patient.id'), nullable=False, index=True)
+    doctor_id = db.Column(db.Integer, db.ForeignKey('doctor.id'), nullable=False, index=True)
+    appointment_id = db.Column(db.Integer, db.ForeignKey('appointment.id'), nullable=True, index=True)
+    admission_id = db.Column(db.Integer, db.ForeignKey('admission.id'), nullable=True, index=True)
+    priority = db.Column(db.String(20), default='Routine', nullable=False, index=True)
+    status = db.Column(db.String(30), default='Ordered', nullable=False, index=True)
+    clinical_notes = db.Column(db.Text, nullable=True)
+    specimen_id = db.Column(db.String(80), unique=True, nullable=True, index=True)
+    sample_notes = db.Column(db.String(500), nullable=True)
+    ordered_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False, index=True)
+    sample_collected_at = db.Column(db.DateTime, nullable=True)
+    processing_started_at = db.Column(db.DateTime, nullable=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    cancelled_at = db.Column(db.DateTime, nullable=True)
+    cancelled_reason = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+    patient = db.relationship('Patient', backref=db.backref('lab_orders', lazy=True), foreign_keys=[patient_id])
+    doctor = db.relationship('Doctor', backref=db.backref('lab_orders', lazy=True), foreign_keys=[doctor_id])
+    appointment = db.relationship('Appointment', backref=db.backref('lab_orders', lazy=True), foreign_keys=[appointment_id])
+    admission = db.relationship('Admission', backref=db.backref('lab_orders', lazy=True), foreign_keys=[admission_id])
+
+
+class LabOrderItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    lab_order_id = db.Column(db.Integer, db.ForeignKey('lab_order.id'), nullable=False, index=True)
+    lab_test_id = db.Column(db.Integer, db.ForeignKey('lab_test.id'), nullable=False, index=True)
+    test_code_snapshot = db.Column(db.String(30), nullable=False)
+    test_name_snapshot = db.Column(db.String(160), nullable=False)
+    unit_snapshot = db.Column(db.String(40), nullable=True)
+    reference_range_snapshot = db.Column(db.String(120), nullable=True)
+    price_snapshot = db.Column(db.Numeric(10, 2), nullable=True)
+    result_value = db.Column(db.Text, nullable=True)
+    interpretation = db.Column(db.String(30), nullable=True)
+    result_notes = db.Column(db.String(500), nullable=True)
+    resulted_at = db.Column(db.DateTime, nullable=True)
+
+    order = db.relationship('LabOrder', backref=db.backref('items', lazy=True, cascade='all, delete-orphan'))
+    lab_test = db.relationship('LabTest', backref=db.backref('order_items', lazy=True))
+
+    __table_args__ = (
+        db.UniqueConstraint('lab_order_id', 'lab_test_id', name='uq_lab_order_test'),
+    )
+
+
+class BillingService(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(30), unique=True, nullable=False, index=True)
+    name = db.Column(db.String(160), unique=True, nullable=False)
+    category = db.Column(db.String(80), nullable=True, index=True)
+    unit_price = db.Column(db.Numeric(10, 2), nullable=False, default=0)
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+
+class Invoice(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_number = db.Column(db.String(40), unique=True, nullable=True, index=True)
+    patient_id = db.Column(db.Integer, db.ForeignKey('patient.id'), nullable=False, index=True)
+    appointment_id = db.Column(db.Integer, db.ForeignKey('appointment.id'), nullable=True, index=True)
+    admission_id = db.Column(db.Integer, db.ForeignKey('admission.id'), nullable=True, index=True)
+    status = db.Column(db.String(30), default='Draft', nullable=False, index=True)
+    subtotal = db.Column(db.Numeric(12, 2), default=0, nullable=False)
+    discount = db.Column(db.Numeric(12, 2), default=0, nullable=False)
+    total = db.Column(db.Numeric(12, 2), default=0, nullable=False)
+    amount_paid = db.Column(db.Numeric(12, 2), default=0, nullable=False)
+    balance_due = db.Column(db.Numeric(12, 2), default=0, nullable=False)
+    notes = db.Column(db.Text, nullable=True)
+    issued_at = db.Column(db.DateTime, nullable=True, index=True)
+    due_at = db.Column(db.DateTime, nullable=True)
+    paid_at = db.Column(db.DateTime, nullable=True)
+    voided_at = db.Column(db.DateTime, nullable=True)
+    void_reason = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
+
+    patient = db.relationship('Patient', backref=db.backref('invoices', lazy=True), foreign_keys=[patient_id])
+    appointment = db.relationship('Appointment', backref=db.backref('invoices', lazy=True), foreign_keys=[appointment_id])
+    admission = db.relationship('Admission', backref=db.backref('invoices', lazy=True), foreign_keys=[admission_id])
+
+
+class InvoiceItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_id = db.Column(db.Integer, db.ForeignKey('invoice.id'), nullable=False, index=True)
+    description = db.Column(db.String(500), nullable=False)
+    quantity = db.Column(db.Numeric(10, 2), default=1, nullable=False)
+    unit_price = db.Column(db.Numeric(12, 2), default=0, nullable=False)
+    amount = db.Column(db.Numeric(12, 2), default=0, nullable=False)
+    source_type = db.Column(db.String(40), nullable=True, index=True)
+    source_id = db.Column(db.Integer, nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
+
+    invoice = db.relationship('Invoice', backref=db.backref('items', lazy=True, cascade='all, delete-orphan'))
+
+
+class Payment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_id = db.Column(db.Integer, db.ForeignKey('invoice.id'), nullable=False, index=True)
+    amount = db.Column(db.Numeric(12, 2), nullable=False)
+    method = db.Column(db.String(30), nullable=False)
+    reference = db.Column(db.String(120), nullable=True)
+    received_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False, index=True)
+    received_by_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+
+    invoice = db.relationship('Invoice', backref=db.backref('payments', lazy=True, cascade='all, delete-orphan'))
+    received_by = db.relationship('User', foreign_keys=[received_by_id])
 
 
 class Prescription(db.Model):

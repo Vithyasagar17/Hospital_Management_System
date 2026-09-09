@@ -1,13 +1,29 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
-from sqlalchemy import or_
+from sqlalchemy import or_, func, and_
 from app import db
-from app.models import Doctor, Patient, Appointment, Specialization, User, AuditLog
+from app.models import Doctor, Patient, Appointment, Specialization, User, AuditLog, Department, Ward, Bed, Admission, LabTest, LabOrder, LabOrderItem, BillingService, Invoice, InvoiceItem, Payment
 from app.routes.auth_decorator import role_required
 from app.activity import log_activity, notify_user
 from app.security import send_verification_email, validate_password
 from app.analytics import build_scheduling_analytics, normalize_window
+from app.departments import department_rows, department_snapshot
+from app.inpatient import (
+    ADMIN_SETTABLE_BED_STATUSES, WARD_TYPES,
+    admit_patient, available_beds, department_bed_snapshot, discharge_admission,
+    hospital_bed_snapshot, transfer_admission, ward_snapshot,
+)
+from app.laboratory import (
+    LAB_INTERPRETATIONS, LAB_ORDER_STATUSES, LAB_PRIORITIES,
+    complete_lab_order, lab_order_summary, parse_price, transition_lab_order,
+)
+from app.billing import (
+    INVOICE_STATUSES, PAYMENT_METHODS, add_invoice_item, add_service_to_invoice,
+    billing_summary, create_invoice, issue_invoice, parse_nonnegative_money,
+    record_payment, refresh_invoice_totals, save_invoice_draft, void_invoice,
+)
 from datetime import datetime, timedelta
+from sqlalchemy.exc import IntegrityError
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -30,8 +46,13 @@ def admin_dashboard():
     week_start = today - timedelta(days=6)
 
     total_doctors = Doctor.query.filter_by(is_blacklisted=False).count()
+    total_departments = Department.query.filter_by(is_active=True).count()
     total_patients = Patient.query.filter_by(is_blacklisted=False).count()
     total_appointments = Appointment.query.count()
+    bed_snapshot = hospital_bed_snapshot()
+    active_inpatients = Admission.query.filter_by(status='Active').count()
+    open_lab_orders = LabOrder.query.filter(LabOrder.status.in_(['Ordered', 'Sample Collected', 'Processing'])).count()
+    billing_snapshot = billing_summary(days=30)
     appointments_today = Appointment.query.filter(
         Appointment.date >= datetime.combine(today, datetime.min.time()),
         Appointment.date < datetime.combine(tomorrow, datetime.min.time())
@@ -60,8 +81,13 @@ def admin_dashboard():
     return render_template(
         'admin_dashboard.html',
         total_doctors=total_doctors,
+        total_departments=total_departments,
         total_patients=total_patients,
         total_appointments=total_appointments,
+        bed_snapshot=bed_snapshot,
+        active_inpatients=active_inpatients,
+        open_lab_orders=open_lab_orders,
+        billing_snapshot=billing_snapshot,
         appointments_today=appointments_today,
         status_counts=status_counts,
         recent_appointments=recent_appointments,
@@ -91,6 +117,406 @@ def admin_overview():
     return render_template('admin_overview.html', doctors=doctors, patients=patients, appointments=appointments)
 
 
+@admin_bp.route('/departments', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def departments():
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        code = request.form.get('code', '').strip().upper()
+        description = request.form.get('description', '').strip()
+        location = request.form.get('location', '').strip()
+
+        if not name or not code:
+            flash('Department name and code are required.', 'warning')
+            return redirect(url_for('admin.departments'))
+        if len(code) > 20:
+            flash('Department code must be 20 characters or fewer.', 'warning')
+            return redirect(url_for('admin.departments'))
+
+        duplicate = Department.query.filter(or_(
+            func.lower(Department.name) == name.lower(),
+            func.lower(Department.code) == code.lower(),
+        )).first()
+        if duplicate:
+            flash('A department with that name or code already exists.', 'warning')
+            return redirect(url_for('admin.departments'))
+
+        department = Department(
+            name=name, code=code, description=description or None,
+            location=location or None, is_active=True,
+        )
+        db.session.add(department)
+        db.session.flush()
+        log_activity('department_created', f'Created department {name} ({code}).', 'Department', department.id)
+        db.session.commit()
+        flash(f'Department {name} created.', 'success')
+        return redirect(url_for('admin.department_detail', department_id=department.id))
+
+    status = request.args.get('status', 'active')
+    q = request.args.get('q', '').strip()
+    rows = department_rows()
+    if status in {'active', 'inactive'}:
+        want_active = status == 'active'
+        rows = [row for row in rows if row['department'].is_active is want_active]
+    if q:
+        q_lower = q.lower()
+        rows = [row for row in rows if q_lower in row['department'].name.lower() or q_lower in row['department'].code.lower()]
+    return render_template('admin_departments.html', rows=rows, status=status, q=q)
+
+
+@admin_bp.route('/department/<int:department_id>', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def department_detail(department_id):
+    department = Department.query.get_or_404(department_id)
+
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        code = request.form.get('code', '').strip().upper()
+        description = request.form.get('description', '').strip()
+        location = request.form.get('location', '').strip()
+        head_doctor_id = request.form.get('head_doctor_id', type=int)
+
+        if not name or not code:
+            flash('Department name and code are required.', 'warning')
+            return redirect(url_for('admin.department_detail', department_id=department.id))
+        if len(name) > 120 or len(code) > 20:
+            flash('Department name or code is too long.', 'warning')
+            return redirect(url_for('admin.department_detail', department_id=department.id))
+
+        duplicate = Department.query.filter(
+            Department.id != department.id,
+            or_(func.lower(Department.name) == name.lower(), func.lower(Department.code) == code.lower()),
+        ).first()
+        if duplicate:
+            flash('Another department already uses that name or code.', 'warning')
+            return redirect(url_for('admin.department_detail', department_id=department.id))
+
+        head = None
+        if head_doctor_id:
+            head = Doctor.query.filter_by(id=head_doctor_id, department_id=department.id, is_blacklisted=False).first()
+            if not head:
+                flash('Department head must be an active doctor assigned to this department.', 'warning')
+                return redirect(url_for('admin.department_detail', department_id=department.id))
+
+        old_head_id = department.head_doctor_id
+        department.name = name
+        department.code = code
+        department.description = description or None
+        department.location = location or None
+        department.head_doctor_id = head.id if head else None
+        log_activity(
+            'department_updated',
+            f'Updated department {name} ({code}); head {old_head_id or "none"} → {department.head_doctor_id or "none"}.',
+            'Department', department.id,
+        )
+        if head and old_head_id != head.id:
+            notify_user(head.id, 'Department leadership assignment', f'You are now the head of {name}.', 'success', '/doctor/profile')
+        db.session.commit()
+        flash(f'Department {name} updated.', 'success')
+        return redirect(url_for('admin.department_detail', department_id=department.id))
+
+    snapshot = department_snapshot(department.id)
+    inpatient_snapshot = department_bed_snapshot(department.id)
+    doctors = Doctor.query.filter_by(department_id=department.id).order_by(Doctor.name).all()
+    head_candidates = [doctor for doctor in doctors if not doctor.is_blacklisted]
+    recent_appointments = Appointment.query.join(Doctor, Appointment.doctor_id == Doctor.id).filter(
+        Doctor.department_id == department.id
+    ).order_by(Appointment.date.desc()).limit(8).all()
+    return render_template(
+        'admin_department_detail.html', department=department, snapshot=snapshot, inpatient_snapshot=inpatient_snapshot,
+        doctors=doctors, head_candidates=head_candidates, recent_appointments=recent_appointments,
+    )
+
+
+@admin_bp.route('/department/<int:department_id>/toggle', methods=['POST'])
+@login_required
+@role_required('Admin')
+def toggle_department(department_id):
+    department = Department.query.get_or_404(department_id)
+    if department.is_active:
+        assigned = Doctor.query.filter_by(department_id=department.id).count()
+        active_wards = Ward.query.filter_by(department_id=department.id, is_active=True).count()
+        if assigned:
+            flash('Reassign all doctors before deactivating this department.', 'warning')
+            return redirect(url_for('admin.department_detail', department_id=department.id))
+        if active_wards:
+            flash('Deactivate all wards before deactivating this department.', 'warning')
+            return redirect(url_for('admin.department_detail', department_id=department.id))
+        department.is_active = False
+        department.head_doctor_id = None
+        action = 'department_deactivated'
+        message = f'Department {department.name} deactivated.'
+    else:
+        department.is_active = True
+        action = 'department_reactivated'
+        message = f'Department {department.name} reactivated.'
+    log_activity(action, message, 'Department', department.id)
+    db.session.commit()
+    flash(message, 'success')
+    return redirect(url_for('admin.departments', status='active' if department.is_active else 'inactive'))
+
+
+@admin_bp.route('/wards', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def wards():
+    departments = Department.query.filter_by(is_active=True).order_by(Department.name).all()
+
+    if request.method == 'POST':
+        department_id = request.form.get('department_id', type=int)
+        name = request.form.get('name', '').strip()
+        code = request.form.get('code', '').strip().upper()
+        ward_type = request.form.get('ward_type', 'General').strip()
+        location = request.form.get('location', '').strip()
+        try:
+            daily_rate = parse_nonnegative_money(request.form.get('daily_rate', ''), 'Daily ward rate') if request.form.get('daily_rate', '').strip() else None
+        except ValueError as exc:
+            flash(str(exc), 'warning')
+            return redirect(url_for('admin.wards'))
+
+        department = Department.query.filter_by(id=department_id, is_active=True).first()
+        if not department or not name or not code:
+            flash('Active department, ward name, and ward code are required.', 'warning')
+            return redirect(url_for('admin.wards'))
+        if ward_type not in WARD_TYPES:
+            flash('Choose a valid ward type.', 'warning')
+            return redirect(url_for('admin.wards'))
+        if len(name) > 120 or len(code) > 30 or len(location) > 120:
+            flash('Ward name, code, or location is too long.', 'warning')
+            return redirect(url_for('admin.wards'))
+
+        duplicate = Ward.query.filter(or_(
+            func.lower(Ward.code) == code.lower(),
+            and_(Ward.department_id == department.id, func.lower(Ward.name) == name.lower()),
+        )).first()
+        if duplicate:
+            flash('That ward code already exists, or this department already has a ward with that name.', 'warning')
+            return redirect(url_for('admin.wards'))
+
+        ward = Ward(
+            department_id=department.id,
+            name=name,
+            code=code,
+            ward_type=ward_type,
+            location=location or None,
+            daily_rate=daily_rate,
+            is_active=True,
+        )
+        db.session.add(ward)
+        db.session.flush()
+        log_activity('ward_created', f'Created ward {name} ({code}) in {department.name}.', 'Ward', ward.id)
+        db.session.commit()
+        flash(f'Ward {name} created.', 'success')
+        return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+    q = request.args.get('q', '').strip()
+    status = request.args.get('status', 'active')
+    department_id = request.args.get('department_id', type=int)
+    query = Ward.query.join(Department, Ward.department_id == Department.id)
+    if status in {'active', 'inactive'}:
+        query = query.filter(Ward.is_active.is_(status == 'active'))
+    if department_id:
+        query = query.filter(Ward.department_id == department_id)
+    if q:
+        query = query.filter(or_(
+            Ward.name.ilike(f'%{q}%'), Ward.code.ilike(f'%{q}%'),
+            Ward.location.ilike(f'%{q}%'), Department.name.ilike(f'%{q}%'),
+        ))
+    rows = [ward_snapshot(ward.id) for ward in query.order_by(Department.name, Ward.name).all()]
+    all_departments = Department.query.order_by(Department.name).all()
+    return render_template(
+        'admin_wards.html', rows=rows, departments=departments, all_departments=all_departments,
+        ward_types=WARD_TYPES, q=q, status=status, department_id=department_id,
+    )
+
+
+@admin_bp.route('/ward/<int:ward_id>', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def ward_detail(ward_id):
+    ward = Ward.query.get_or_404(ward_id)
+    departments = Department.query.order_by(Department.name).all()
+
+    if request.method == 'POST':
+        department_id = request.form.get('department_id', type=int)
+        name = request.form.get('name', '').strip()
+        code = request.form.get('code', '').strip().upper()
+        ward_type = request.form.get('ward_type', 'General').strip()
+        location = request.form.get('location', '').strip()
+        try:
+            daily_rate = parse_nonnegative_money(request.form.get('daily_rate', ''), 'Daily ward rate') if request.form.get('daily_rate', '').strip() else None
+        except ValueError as exc:
+            flash(str(exc), 'warning')
+            return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+        target_department = Department.query.filter_by(id=department_id, is_active=True).first()
+
+        if not target_department or not name or not code:
+            flash('Active department, ward name, and ward code are required.', 'warning')
+            return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+        if ward_type not in WARD_TYPES:
+            flash('Choose a valid ward type.', 'warning')
+            return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+        duplicate = Ward.query.filter(
+            Ward.id != ward.id,
+            or_(
+                func.lower(Ward.code) == code.lower(),
+                and_(Ward.department_id == target_department.id, func.lower(Ward.name) == name.lower()),
+            ),
+        ).first()
+        if duplicate:
+            flash('Another ward already uses that code, or the target department already has that name.', 'warning')
+            return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+        if target_department.id != ward.department_id:
+            protected_beds = Bed.query.filter(
+                Bed.ward_id == ward.id,
+                Bed.status.in_(['Reserved', 'Occupied']),
+            ).count()
+            if protected_beds:
+                flash('A ward with reserved or occupied beds cannot be moved to another department.', 'warning')
+                return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+        old_department_id = ward.department_id
+        ward.department_id = target_department.id
+        ward.name = name
+        ward.code = code
+        ward.ward_type = ward_type
+        ward.location = location or None
+        ward.daily_rate = daily_rate
+        log_activity(
+            'ward_updated',
+            f'Updated ward {name} ({code}); department {old_department_id} → {ward.department_id}.',
+            'Ward', ward.id,
+        )
+        db.session.commit()
+        flash(f'Ward {name} updated.', 'success')
+        return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+    snapshot = ward_snapshot(ward.id)
+    beds = Bed.query.filter_by(ward_id=ward.id).order_by(Bed.bed_number).all()
+    active_rows = Admission.query.filter(
+        Admission.ward_id == ward.id, Admission.status == 'Active'
+    ).all()
+    occupant_by_bed = {row.bed_id: row for row in active_rows}
+    return render_template(
+        'admin_ward_detail.html', ward=ward, snapshot=snapshot, beds=beds,
+        departments=departments, ward_types=WARD_TYPES,
+        bed_statuses=ADMIN_SETTABLE_BED_STATUSES, occupant_by_bed=occupant_by_bed,
+    )
+
+
+@admin_bp.route('/ward/<int:ward_id>/toggle', methods=['POST'])
+@login_required
+@role_required('Admin')
+def toggle_ward(ward_id):
+    ward = Ward.query.get_or_404(ward_id)
+    if ward.is_active:
+        protected_beds = Bed.query.filter(
+            Bed.ward_id == ward.id,
+            Bed.status.in_(['Reserved', 'Occupied']),
+        ).count()
+        if protected_beds:
+            flash('A ward with reserved or occupied beds cannot be deactivated.', 'warning')
+            return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+        ward.is_active = False
+        action = 'ward_deactivated'
+        message = f'Ward {ward.name} deactivated.'
+    else:
+        if not ward.department or not ward.department.is_active:
+            flash('Reactivate the parent department before reactivating this ward.', 'warning')
+            return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+        ward.is_active = True
+        action = 'ward_reactivated'
+        message = f'Ward {ward.name} reactivated.'
+    log_activity(action, message, 'Ward', ward.id)
+    db.session.commit()
+    flash(message, 'success')
+    return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+
+@admin_bp.route('/ward/<int:ward_id>/beds', methods=['POST'])
+@login_required
+@role_required('Admin')
+def add_bed(ward_id):
+    ward = Ward.query.get_or_404(ward_id)
+    bed_number = request.form.get('bed_number', '').strip().upper()
+    status = request.form.get('status', 'Available').strip()
+    notes = request.form.get('notes', '').strip()
+
+    if not ward.is_active:
+        flash('Reactivate the ward before adding beds.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+    if not bed_number or len(bed_number) > 30:
+        flash('Bed number is required and must be 30 characters or fewer.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+    if status not in ADMIN_SETTABLE_BED_STATUSES:
+        flash('Occupied beds can only be assigned through the admission workflow.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+    duplicate = Bed.query.filter(
+        Bed.ward_id == ward.id,
+        func.lower(Bed.bed_number) == bed_number.lower(),
+    ).first()
+    if duplicate:
+        flash('That bed number already exists in this ward.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+    bed = Bed(ward_id=ward.id, bed_number=bed_number, status=status, notes=notes or None)
+    db.session.add(bed)
+    db.session.flush()
+    log_activity('bed_created', f'Created bed {bed_number} in {ward.name}; status {status}.', 'Bed', bed.id)
+    db.session.commit()
+    flash(f'Bed {bed_number} added to {ward.name}.', 'success')
+    return redirect(url_for('admin.ward_detail', ward_id=ward.id))
+
+
+@admin_bp.route('/bed/<int:bed_id>/update', methods=['POST'])
+@login_required
+@role_required('Admin')
+def update_bed(bed_id):
+    bed = Bed.query.get_or_404(bed_id)
+    bed_number = request.form.get('bed_number', '').strip().upper()
+    status = request.form.get('status', bed.status).strip()
+    notes = request.form.get('notes', '').strip()
+
+    if not bed_number or len(bed_number) > 30:
+        flash('Bed number is required and must be 30 characters or fewer.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=bed.ward_id))
+    if bed.status == 'Occupied':
+        flash('Occupied beds are controlled by the admission and discharge workflow.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=bed.ward_id))
+    if status not in ADMIN_SETTABLE_BED_STATUSES:
+        flash('Occupied status can only be set by the admission workflow.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=bed.ward_id))
+    if status == 'Reserved' and not bed.ward.is_active:
+        flash('Beds in an inactive ward cannot be reserved.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=bed.ward_id))
+
+    duplicate = Bed.query.filter(
+        Bed.ward_id == bed.ward_id,
+        Bed.id != bed.id,
+        func.lower(Bed.bed_number) == bed_number.lower(),
+    ).first()
+    if duplicate:
+        flash('That bed number already exists in this ward.', 'warning')
+        return redirect(url_for('admin.ward_detail', ward_id=bed.ward_id))
+
+    old_number, old_status = bed.bed_number, bed.status
+    bed.bed_number = bed_number
+    bed.status = status
+    bed.notes = notes or None
+    log_activity(
+        'bed_updated',
+        f'Updated bed {old_number} → {bed_number} in {bed.ward.name}; status {old_status} → {status}.',
+        'Bed', bed.id,
+    )
+    db.session.commit()
+    flash(f'Bed {bed.bed_number} updated.', 'success')
+    return redirect(url_for('admin.ward_detail', ward_id=bed.ward_id))
+
+
 @admin_bp.route('/doctors')
 @login_required
 @role_required('Admin')
@@ -98,17 +524,26 @@ def admin_doctors():
     status = request.args.get('status', 'active')
     q = request.args.get('q', '').strip()
     specialization_id = request.args.get('specialization_id', type=int)
+    department_id = request.args.get('department_id', type=int)
 
     query = Doctor.query
     query = query.filter(Doctor.is_blacklisted.is_(status == 'blacklisted'))
     if q:
-        query = query.filter(Doctor.name.ilike(f'%{q}%'))
+        query = query.filter(or_(
+            Doctor.name.ilike(f'%{q}%'),
+            Doctor.specialization.has(Specialization.name.ilike(f'%{q}%')),
+            Doctor.department.has(Department.name.ilike(f'%{q}%')),
+        ))
     if specialization_id:
         query = query.filter(Doctor.specialization_id == specialization_id)
+    if department_id:
+        query = query.filter(Doctor.department_id == department_id)
     doctors = query.order_by(Doctor.name).all()
     specializations = Specialization.query.order_by(Specialization.name).all()
+    departments = Department.query.order_by(Department.name).all()
     return render_template('admin_doctors.html', doctors=doctors, status=status, q=q,
-                           specialization_id=specialization_id, specializations=specializations)
+                           specialization_id=specialization_id, specializations=specializations,
+                           department_id=department_id, departments=departments)
 
 
 @admin_bp.route('/doctor/add', methods=['GET', 'POST'])
@@ -116,6 +551,7 @@ def admin_doctors():
 @role_required('Admin')
 def add_doctor():
     specializations = Specialization.query.order_by(Specialization.name).all()
+    departments = Department.query.filter_by(is_active=True).order_by(Department.name).all()
 
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
@@ -123,6 +559,12 @@ def add_doctor():
         password = request.form.get('password', '')
         name = request.form.get('name', '').strip()
         specialization_id = request.form.get('specialization_id')
+        department_id = request.form.get('department_id')
+        try:
+            consultation_fee = parse_nonnegative_money(request.form.get('consultation_fee', ''), 'Consultation fee') if request.form.get('consultation_fee', '').strip() else None
+        except ValueError as exc:
+            flash(str(exc), 'warning')
+            return redirect(url_for('admin.add_doctor'))
 
         password_ok, password_error = validate_password(password)
         if not username or not email or not password or not name:
@@ -139,12 +581,19 @@ def add_doctor():
             spec_id = int(specialization_id) if specialization_id else None
         except ValueError:
             spec_id = None
+        try:
+            dept_id = int(department_id) if department_id else None
+        except ValueError:
+            dept_id = None
+        if dept_id and not Department.query.filter_by(id=dept_id, is_active=True).first():
+            flash('Choose an active department.', 'warning')
+            return redirect(url_for('admin.add_doctor'))
 
         user = User(username=username, email=email, email_verified=False, role='Doctor', session_version=1)
         user.set_password(password)
         db.session.add(user)
         db.session.flush()
-        doctor = Doctor(id=user.id, name=name, specialization_id=spec_id)
+        doctor = Doctor(id=user.id, name=name, specialization_id=spec_id, department_id=dept_id, consultation_fee=consultation_fee)
         db.session.add(doctor)
         log_activity('doctor_created', f'Added doctor {name} ({username}).', 'Doctor', user.id)
         notify_user(user.id, 'Doctor account created', 'Your doctor workspace is ready. Complete your profile and availability.', 'success', '/doctor/dashboard')
@@ -154,7 +603,7 @@ def add_doctor():
         flash(f'Doctor {name} added. A verification link was sent to {email}.', 'success')
         return redirect(url_for('admin.admin_doctors'))
 
-    return render_template('admin_add_doctor.html', specializations=specializations)
+    return render_template('admin_add_doctor.html', specializations=specializations, departments=departments)
 
 
 @admin_bp.route('/patients')
@@ -311,23 +760,47 @@ def audit_logs():
 def edit_doctor(doctor_id):
     doctor = Doctor.query.get_or_404(doctor_id)
     specializations = Specialization.query.order_by(Specialization.name).all()
+    departments = Department.query.order_by(Department.name).all()
 
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
         specialization_id = request.form.get('specialization_id')
+        department_id = request.form.get('department_id')
+        try:
+            consultation_fee = parse_nonnegative_money(request.form.get('consultation_fee', ''), 'Consultation fee') if request.form.get('consultation_fee', '').strip() else None
+        except ValueError as exc:
+            flash(str(exc), 'warning')
+            return redirect(url_for('admin.edit_doctor', doctor_id=doctor_id))
         if not name:
             flash('Doctor name is required.', 'warning')
             return redirect(url_for('admin.edit_doctor', doctor_id=doctor_id))
         doctor.name = name
+        doctor.consultation_fee = consultation_fee
         try:
             doctor.specialization_id = int(specialization_id) if specialization_id else None
         except ValueError:
             doctor.specialization_id = None
+        try:
+            new_department_id = int(department_id) if department_id else None
+        except ValueError:
+            new_department_id = None
+        if new_department_id and not Department.query.filter_by(id=new_department_id, is_active=True).first():
+            flash('Choose an active department.', 'warning')
+            return redirect(url_for('admin.edit_doctor', doctor_id=doctor_id))
+        old_department_id = doctor.department_id
+        if old_department_id != new_department_id:
+            if Admission.query.filter_by(doctor_id=doctor.id, status='Active').count():
+                flash('Discharge or reassign the doctor’s active inpatients before changing departments.', 'warning')
+                return redirect(url_for('admin.edit_doctor', doctor_id=doctor_id))
+            for led_department in Department.query.filter_by(head_doctor_id=doctor.id).all():
+                led_department.head_doctor_id = None
+            doctor.department_id = new_department_id
+            notify_user(doctor.id, 'Department assignment updated', 'Your hospital department assignment has changed. Open your profile for details.', 'info', '/doctor/profile')
         log_activity('doctor_updated', f'Updated doctor profile for {name}.', 'Doctor', doctor.id)
         db.session.commit()
         flash(f'Doctor {name} updated successfully.', 'success')
         return redirect(url_for('admin.admin_doctors'))
-    return render_template('admin_edit_doctor.html', doctor=doctor, specializations=specializations)
+    return render_template('admin_edit_doctor.html', doctor=doctor, specializations=specializations, departments=departments)
 
 
 @admin_bp.route('/patient/<int:patient_id>/edit', methods=['GET', 'POST'])
@@ -363,12 +836,365 @@ def edit_patient(patient_id):
     return render_template('admin_edit_patient.html', patient=patient)
 
 
+
+@admin_bp.route('/laboratory')
+@login_required
+@role_required('Admin')
+def laboratory():
+    status = request.args.get('status', 'all')
+    priority = request.args.get('priority', 'all')
+    q = request.args.get('q', '').strip()
+
+    query = LabOrder.query.join(Patient, LabOrder.patient_id == Patient.id).join(
+        Doctor, LabOrder.doctor_id == Doctor.id
+    )
+    if status in LAB_ORDER_STATUSES:
+        query = query.filter(LabOrder.status == status)
+    if priority in LAB_PRIORITIES:
+        query = query.filter(LabOrder.priority == priority)
+    if q:
+        query = query.filter(or_(
+            Patient.name.ilike(f'%{q}%'),
+            Doctor.name.ilike(f'%{q}%'),
+            LabOrder.items.any(LabOrderItem.test_name_snapshot.ilike(f'%{q}%')),
+            LabOrder.items.any(LabOrderItem.test_code_snapshot.ilike(f'%{q}%')),
+        ))
+    orders = query.order_by(LabOrder.ordered_at.desc(), LabOrder.id.desc()).all()
+    summary = lab_order_summary(LabOrder.query)
+    return render_template(
+        'admin_lab_orders.html', orders=orders, summary=summary, status=status,
+        priority=priority, q=q, statuses=LAB_ORDER_STATUSES, priorities=LAB_PRIORITIES,
+    )
+
+
+@admin_bp.route('/laboratory/tests', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def lab_catalog():
+    if request.method == 'POST':
+        code = request.form.get('code', '').strip().upper()
+        name = request.form.get('name', '').strip()
+        category = request.form.get('category', '').strip()
+        specimen_type = request.form.get('specimen_type', '').strip()
+        default_unit = request.form.get('default_unit', '').strip()
+        reference_range = request.form.get('reference_range', '').strip()
+        turnaround_raw = request.form.get('turnaround_hours', '').strip()
+        if not code or not name:
+            flash('Test code and name are required.', 'warning')
+            return redirect(url_for('admin.lab_catalog'))
+        duplicate = LabTest.query.filter(or_(
+            func.lower(LabTest.code) == code.lower(),
+            func.lower(LabTest.name) == name.lower(),
+        )).first()
+        if duplicate:
+            flash('A laboratory test with that code or name already exists.', 'warning')
+            return redirect(url_for('admin.lab_catalog'))
+        try:
+            price = parse_price(request.form.get('base_price'))
+            turnaround_hours = int(turnaround_raw) if turnaround_raw else None
+            if turnaround_hours is not None and turnaround_hours < 0:
+                raise ValueError('Turnaround hours cannot be negative.')
+        except ValueError as exc:
+            flash(str(exc), 'warning')
+            return redirect(url_for('admin.lab_catalog'))
+
+        test = LabTest(
+            code=code, name=name, category=category or None,
+            specimen_type=specimen_type or None, default_unit=default_unit or None,
+            reference_range=reference_range or None, base_price=price,
+            turnaround_hours=turnaround_hours, is_active=True,
+        )
+        db.session.add(test)
+        db.session.flush()
+        log_activity('lab_test_created', f'Created laboratory test {name} ({code}).', 'LabTest', test.id)
+        db.session.commit()
+        flash(f'Laboratory test {name} created.', 'success')
+        return redirect(url_for('admin.lab_catalog'))
+
+    tests = LabTest.query.order_by(LabTest.is_active.desc(), LabTest.category, LabTest.name).all()
+    return render_template('admin_lab_catalog.html', tests=tests)
+
+
+@admin_bp.route('/laboratory/test/<int:test_id>/update', methods=['POST'])
+@login_required
+@role_required('Admin')
+def update_lab_test(test_id):
+    test = LabTest.query.get_or_404(test_id)
+    name = request.form.get('name', '').strip()
+    category = request.form.get('category', '').strip()
+    specimen_type = request.form.get('specimen_type', '').strip()
+    default_unit = request.form.get('default_unit', '').strip()
+    reference_range = request.form.get('reference_range', '').strip()
+    turnaround_raw = request.form.get('turnaround_hours', '').strip()
+    is_active = request.form.get('is_active') == '1'
+    if not name:
+        flash('Test name is required.', 'warning')
+        return redirect(url_for('admin.lab_catalog'))
+    duplicate = LabTest.query.filter(
+        func.lower(LabTest.name) == name.lower(), LabTest.id != test.id
+    ).first()
+    if duplicate:
+        flash('Another laboratory test already uses that name.', 'warning')
+        return redirect(url_for('admin.lab_catalog'))
+    try:
+        price = parse_price(request.form.get('base_price'))
+        turnaround_hours = int(turnaround_raw) if turnaround_raw else None
+        if turnaround_hours is not None and turnaround_hours < 0:
+            raise ValueError('Turnaround hours cannot be negative.')
+    except ValueError as exc:
+        flash(str(exc), 'warning')
+        return redirect(url_for('admin.lab_catalog'))
+
+    previous_state = test.is_active
+    test.name = name
+    test.category = category or None
+    test.specimen_type = specimen_type or None
+    test.default_unit = default_unit or None
+    test.reference_range = reference_range or None
+    test.base_price = price
+    test.turnaround_hours = turnaround_hours
+    test.is_active = is_active
+    log_activity(
+        'lab_test_updated',
+        f'Updated laboratory test {test.code}; active {previous_state} → {test.is_active}.',
+        'LabTest', test.id,
+    )
+    db.session.commit()
+    flash(f'{test.code} updated.', 'success')
+    return redirect(url_for('admin.lab_catalog'))
+
+
+@admin_bp.route('/laboratory/order/<int:order_id>')
+@login_required
+@role_required('Admin')
+def lab_order_detail(order_id):
+    order = LabOrder.query.get_or_404(order_id)
+    return render_template(
+        'lab_order_detail.html', order=order, viewer_role='Admin',
+        back_url=url_for('admin.laboratory'), statuses=LAB_ORDER_STATUSES,
+        interpretations=LAB_INTERPRETATIONS,
+        transition_url=url_for('admin.transition_lab_order_route', order_id=order.id),
+        results_url=url_for('admin.lab_results', order_id=order.id), cancel_url=None,
+    )
+
+
+@admin_bp.route('/laboratory/order/<int:order_id>/status', methods=['POST'])
+@login_required
+@role_required('Admin')
+def transition_lab_order_route(order_id):
+    order = LabOrder.query.get_or_404(order_id)
+    new_status = request.form.get('status', '').strip()
+    previous_status = order.status
+    try:
+        transition_lab_order(
+            order, new_status, cancelled_reason=request.form.get('cancelled_reason'),
+            specimen_id=request.form.get('specimen_id'), sample_notes=request.form.get('sample_notes'),
+        )
+        log_activity(
+            'lab_order_status_changed',
+            f'Lab order #{order.id}: {previous_status} → {new_status}.',
+            'LabOrder', order.id,
+        )
+        if new_status == 'Sample Collected':
+            notify_user(order.patient_id, 'Lab sample collected', f'Sample collection is complete for lab order #{order.id}.', 'info', f'/patient/laboratory/order/{order.id}')
+        elif new_status == 'Processing':
+            notify_user(order.patient_id, 'Lab tests processing', f'Lab order #{order.id} is now being processed.', 'info', f'/patient/laboratory/order/{order.id}')
+        elif new_status == 'Cancelled':
+            message = f'Lab order #{order.id} was cancelled. Reason: {order.cancelled_reason}'
+            notify_user(order.patient_id, 'Lab order cancelled', message, 'warning', f'/patient/laboratory/order/{order.id}')
+            notify_user(order.doctor_id, 'Lab order cancelled', message, 'warning', f'/doctor/laboratory/order/{order.id}')
+        db.session.commit()
+        flash(f'Lab order moved to {new_status}.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.lab_order_detail', order_id=order.id))
+
+
+@admin_bp.route('/laboratory/order/<int:order_id>/results', methods=['POST'])
+@login_required
+@role_required('Admin')
+def lab_results(order_id):
+    order = LabOrder.query.get_or_404(order_id)
+    payload = {}
+    for item in order.items:
+        payload[item.id] = {
+            'value': request.form.get(f'result_{item.id}', ''),
+            'interpretation': request.form.get(f'interpretation_{item.id}', ''),
+            'notes': request.form.get(f'notes_{item.id}', ''),
+        }
+    try:
+        complete_lab_order(order, payload)
+        log_activity('lab_results_completed', f'Finalized results for lab order #{order.id}.', 'LabOrder', order.id)
+        notify_user(order.patient_id, 'Lab results available', f'Results for lab order #{order.id} are ready to review.', 'success', f'/patient/laboratory/order/{order.id}')
+        notify_user(order.doctor_id, 'Lab results available', f'Results for {order.patient.name or "your patient"} are ready in lab order #{order.id}.', 'success', f'/doctor/laboratory/order/{order.id}')
+        db.session.commit()
+        flash('Laboratory results finalized and released.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.lab_order_detail', order_id=order.id))
+
+
+@admin_bp.route('/admissions', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def admissions():
+    if request.method == 'POST':
+        patient_id = request.form.get('patient_id', type=int)
+        doctor_id = request.form.get('doctor_id', type=int)
+        bed_id = request.form.get('bed_id', type=int)
+        appointment_id = request.form.get('appointment_id', type=int)
+        reason = request.form.get('reason', '').strip()
+        diagnosis = request.form.get('diagnosis', '').strip()
+        bed = db.session.get(Bed, bed_id) if bed_id else None
+
+        try:
+            if not bed or not bed.ward:
+                raise ValueError('Choose an available inpatient bed.')
+            admission = admit_patient(
+                patient_id=patient_id,
+                doctor_id=doctor_id,
+                department_id=bed.ward.department_id,
+                bed_id=bed.id,
+                appointment_id=appointment_id,
+                reason=reason,
+                diagnosis=diagnosis,
+                created_by_id=current_user.id,
+            )
+            patient_name = admission.patient.name or f'Patient #{admission.patient_id}'
+            doctor_name = admission.doctor.name or f'Doctor #{admission.doctor_id}'
+            log_activity(
+                'patient_admitted',
+                f'Admitted {patient_name} to {admission.ward.name} / bed {admission.bed.bed_number} under {doctor_name}.',
+                'Admission', admission.id,
+            )
+            notify_user(
+                admission.patient_id,
+                'Inpatient admission created',
+                f'You were admitted to {admission.ward.name}, bed {admission.bed.bed_number}, under Dr. {doctor_name}.',
+                'info',
+                f'/patient/admission/{admission.id}',
+            )
+            if admission.doctor_id != current_user.id:
+                notify_user(
+                    admission.doctor_id,
+                    'Patient admitted under your care',
+                    f'{patient_name} was admitted to {admission.ward.name}, bed {admission.bed.bed_number}.',
+                    'info',
+                    f'/doctor/inpatient/{admission.id}',
+                )
+            db.session.commit()
+            flash(f'{patient_name} admitted successfully.', 'success')
+            return redirect(url_for('admin.admission_detail', admission_id=admission.id))
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'warning')
+        except IntegrityError:
+            db.session.rollback()
+            flash('The patient or bed was assigned by another request. Refresh and try again.', 'warning')
+        return redirect(url_for('admin.admissions'))
+
+    status = request.args.get('status', 'Active')
+    q = request.args.get('q', '').strip()
+    query = Admission.query.join(Patient, Admission.patient_id == Patient.id).join(
+        Doctor, Admission.doctor_id == Doctor.id
+    ).join(Ward, Admission.ward_id == Ward.id).join(Bed, Admission.bed_id == Bed.id)
+    if status in {'Active', 'Discharged'}:
+        query = query.filter(Admission.status == status)
+    if q:
+        query = query.filter(or_(
+            Patient.name.ilike(f'%{q}%'), Doctor.name.ilike(f'%{q}%'),
+            Ward.name.ilike(f'%{q}%'), Bed.bed_number.ilike(f'%{q}%'),
+            Admission.reason.ilike(f'%{q}%'),
+        ))
+    rows = query.order_by(Admission.admitted_at.desc()).all()
+    patients = Patient.query.filter_by(is_blacklisted=False).order_by(Patient.name).all()
+    doctors = Doctor.query.join(Department, Doctor.department_id == Department.id).filter(
+        Doctor.is_blacklisted.is_(False), Department.is_active.is_(True)
+    ).order_by(Doctor.name).all()
+    beds = available_beds()
+    return render_template(
+        'admin_admissions.html', admissions=rows, patients=patients, doctors=doctors,
+        beds=beds, status=status, q=q,
+    )
+
+
+@admin_bp.route('/admission/<int:admission_id>')
+@login_required
+@role_required('Admin')
+def admission_detail(admission_id):
+    admission = Admission.query.get_or_404(admission_id)
+    transfer_beds = available_beds(admission.department_id) if admission.status == 'Active' else []
+    transfers = sorted(admission.transfers, key=lambda item: item.transferred_at, reverse=True)
+    return render_template(
+        'inpatient_admission_detail.html', admission=admission, transfers=transfers,
+        transfer_beds=transfer_beds, viewer_role='Admin',
+        transfer_url=url_for('admin.transfer_admission_route', admission_id=admission.id),
+        discharge_url=url_for('admin.discharge_admission_route', admission_id=admission.id),
+        back_url=url_for('admin.admissions'),
+    )
+
+
+@admin_bp.route('/admission/<int:admission_id>/transfer', methods=['POST'])
+@login_required
+@role_required('Admin')
+def transfer_admission_route(admission_id):
+    admission = Admission.query.get_or_404(admission_id)
+    to_bed_id = request.form.get('bed_id', type=int)
+    reason = request.form.get('reason', '').strip()
+    try:
+        old_label = f'{admission.ward.name} / {admission.bed.bed_number}'
+        transfer = transfer_admission(
+            admission, to_bed_id=to_bed_id,
+            transferred_by_id=current_user.id, reason=reason,
+        )
+        new_label = f'{transfer.to_ward.name} / {transfer.to_bed.bed_number}'
+        log_activity('inpatient_transferred', f'Admission #{admission.id}: {old_label} → {new_label}.', 'Admission', admission.id)
+        notify_user(admission.patient_id, 'Inpatient bed transfer', f'Your inpatient location changed from {old_label} to {new_label}.', 'info', f'/patient/admission/{admission.id}')
+        notify_user(admission.doctor_id, 'Patient bed transfer', f'{admission.patient.name or "Patient"} moved from {old_label} to {new_label}.', 'info', f'/doctor/inpatient/{admission.id}')
+        db.session.commit()
+        flash(f'Patient transferred to {new_label}.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    except IntegrityError:
+        db.session.rollback()
+        flash('That destination bed was assigned by another request. Choose another bed.', 'warning')
+    return redirect(url_for('admin.admission_detail', admission_id=admission.id))
+
+
+@admin_bp.route('/admission/<int:admission_id>/discharge', methods=['POST'])
+@login_required
+@role_required('Admin')
+def discharge_admission_route(admission_id):
+    admission = Admission.query.get_or_404(admission_id)
+    summary = request.form.get('summary', '').strip()
+    try:
+        released_bed = f'{admission.ward.name} / {admission.bed.bed_number}'
+        discharge_admission(admission, summary=summary, discharged_by_id=current_user.id)
+        log_activity('patient_discharged', f'Discharged admission #{admission.id}; released {released_bed}.', 'Admission', admission.id)
+        notify_user(admission.patient_id, 'Hospital discharge recorded', 'Your inpatient stay has been discharged. The discharge summary is available in your admission history.', 'success', f'/patient/admission/{admission.id}')
+        notify_user(admission.doctor_id, 'Patient discharged', f'{admission.patient.name or "Patient"} was discharged from {released_bed}.', 'success', f'/doctor/inpatient/{admission.id}')
+        db.session.commit()
+        flash('Patient discharged and bed released.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.admission_detail', admission_id=admission.id))
+
+
 @admin_bp.route('/doctor/<int:doctor_id>/blacklist', methods=['POST'])
 @login_required
 @role_required('Admin')
 def blacklist_doctor(doctor_id):
     doctor = Doctor.query.get_or_404(doctor_id)
+    if Admission.query.filter_by(doctor_id=doctor.id, status='Active').count():
+        flash('Discharge or reassign the doctor’s active inpatients before blacklisting this account.', 'warning')
+        return redirect(url_for('admin.admin_doctors'))
     doctor.is_blacklisted = True
+    for department in Department.query.filter_by(head_doctor_id=doctor.id).all():
+        department.head_doctor_id = None
     log_activity('doctor_blacklisted', f'Blacklisted doctor {doctor.name}.', 'Doctor', doctor.id)
     notify_user(doctor.id, 'Account access changed', 'Your doctor account has been blacklisted by an administrator.', 'warning', '/doctor/dashboard')
     db.session.commit()
@@ -413,3 +1239,315 @@ def unblacklist_patient(patient_id):
     db.session.commit()
     flash(f'Patient {patient.name} has been unblacklisted.', 'success')
     return redirect(url_for('admin.admin_patients'))
+
+
+# ----------------------------- Phase 6D Billing -----------------------------
+
+@admin_bp.route('/billing')
+@login_required
+@role_required('Admin')
+def billing():
+    status = request.args.get('status', 'all')
+    q = request.args.get('q', '').strip()
+    query = Invoice.query.join(Patient, Invoice.patient_id == Patient.id)
+    if status in INVOICE_STATUSES:
+        query = query.filter(Invoice.status == status)
+    if q:
+        clauses = [
+            Patient.name.ilike(f'%{q}%'),
+            Invoice.invoice_number.ilike(f'%{q}%'),
+        ]
+        if q.isdigit():
+            clauses.append(Invoice.id == int(q))
+        query = query.filter(or_(*clauses))
+    invoices = query.order_by(Invoice.created_at.desc()).limit(250).all()
+    summary = billing_summary(days=30)
+    return render_template(
+        'admin_billing.html', invoices=invoices, summary=summary,
+        statuses=INVOICE_STATUSES, status=status, q=q,
+    )
+
+
+@admin_bp.route('/billing/services', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def billing_services():
+    if request.method == 'POST':
+        code = request.form.get('code', '').strip().upper()
+        name = request.form.get('name', '').strip()
+        category = request.form.get('category', '').strip()
+        try:
+            unit_price = parse_nonnegative_money(request.form.get('unit_price', ''), 'Service price')
+        except ValueError as exc:
+            flash(str(exc), 'warning')
+            return redirect(url_for('admin.billing_services'))
+        if not code or not name:
+            flash('Service code and name are required.', 'warning')
+            return redirect(url_for('admin.billing_services'))
+        duplicate = BillingService.query.filter(or_(
+            func.lower(BillingService.code) == code.lower(),
+            func.lower(BillingService.name) == name.lower(),
+        )).first()
+        if duplicate:
+            flash('A billing service already uses that code or name.', 'warning')
+            return redirect(url_for('admin.billing_services'))
+        service = BillingService(
+            code=code, name=name, category=category or None,
+            unit_price=unit_price, is_active=True,
+        )
+        db.session.add(service)
+        db.session.flush()
+        log_activity('billing_service_created', f'Created billable service {name} ({code}) at ₹{unit_price:.2f}.', 'BillingService', service.id)
+        db.session.commit()
+        flash(f'Billing service {name} created.', 'success')
+        return redirect(url_for('admin.billing_services'))
+
+    services = BillingService.query.order_by(BillingService.category, BillingService.name).all()
+    return render_template('admin_billing_services.html', services=services)
+
+
+@admin_bp.route('/billing/service/<int:service_id>/update', methods=['POST'])
+@login_required
+@role_required('Admin')
+def update_billing_service(service_id):
+    service = BillingService.query.get_or_404(service_id)
+    name = request.form.get('name', '').strip()
+    category = request.form.get('category', '').strip()
+    is_active = request.form.get('is_active') == '1'
+    try:
+        unit_price = parse_nonnegative_money(request.form.get('unit_price', ''), 'Service price')
+    except ValueError as exc:
+        flash(str(exc), 'warning')
+        return redirect(url_for('admin.billing_services'))
+    if not name:
+        flash('Service name is required.', 'warning')
+        return redirect(url_for('admin.billing_services'))
+    duplicate = BillingService.query.filter(
+        BillingService.id != service.id,
+        func.lower(BillingService.name) == name.lower(),
+    ).first()
+    if duplicate:
+        flash('Another billing service already uses that name.', 'warning')
+        return redirect(url_for('admin.billing_services'))
+    old_price = service.unit_price
+    service.name = name
+    service.category = category or None
+    service.unit_price = unit_price
+    service.is_active = is_active
+    log_activity('billing_service_updated', f'Updated billing service {service.code}; ₹{old_price or 0} → ₹{unit_price}.', 'BillingService', service.id)
+    db.session.commit()
+    flash(f'Billing service {service.name} updated.', 'success')
+    return redirect(url_for('admin.billing_services'))
+
+
+@admin_bp.route('/billing/new', methods=['GET', 'POST'])
+@login_required
+@role_required('Admin')
+def new_invoice():
+    if request.method == 'POST':
+        source = request.form.get('source', 'manual')
+        patient_id = request.form.get('patient_id', type=int)
+        appointment_id = None
+        admission_id = None
+        if source.startswith('appointment:'):
+            try:
+                appointment_id = int(source.split(':', 1)[1])
+            except ValueError:
+                appointment_id = None
+            appointment = db.session.get(Appointment, appointment_id) if appointment_id else None
+            if appointment:
+                patient_id = appointment.patient_id
+        elif source.startswith('admission:'):
+            try:
+                admission_id = int(source.split(':', 1)[1])
+            except ValueError:
+                admission_id = None
+            admission = db.session.get(Admission, admission_id) if admission_id else None
+            if admission:
+                patient_id = admission.patient_id
+        try:
+            invoice = create_invoice(
+                patient_id=patient_id,
+                appointment_id=appointment_id,
+                admission_id=admission_id,
+                notes=request.form.get('notes'),
+            )
+            log_activity('invoice_created', f'Created draft invoice {invoice.invoice_number} for patient #{invoice.patient_id}.', 'Invoice', invoice.id)
+            db.session.commit()
+            flash(f'Draft invoice {invoice.invoice_number} created. Review charges before issuing.', 'success')
+            return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'warning')
+
+    patients = Patient.query.filter_by(is_blacklisted=False).order_by(Patient.name).all()
+    appointments = Appointment.query.filter_by(status='Completed').order_by(Appointment.date.desc()).limit(200).all()
+    admissions = Admission.query.filter_by(status='Discharged').order_by(Admission.discharged_at.desc()).limit(200).all()
+    preselected_appointment = request.args.get('appointment_id', type=int)
+    preselected_admission = request.args.get('admission_id', type=int)
+    preselected_patient = request.args.get('patient_id', type=int)
+    return render_template(
+        'admin_new_invoice.html', patients=patients, appointments=appointments, admissions=admissions,
+        preselected_appointment=preselected_appointment, preselected_admission=preselected_admission,
+        preselected_patient=preselected_patient,
+    )
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>')
+@login_required
+@role_required('Admin')
+def invoice_detail(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    refresh_invoice_totals(invoice)
+    db.session.commit()
+    services = BillingService.query.filter_by(is_active=True).order_by(BillingService.category, BillingService.name).all()
+    return render_template(
+        'invoice_detail.html', invoice=invoice, viewer_role='Admin', services=services,
+        payment_methods=PAYMENT_METHODS, back_url=url_for('admin.billing'),
+    )
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>/draft', methods=['POST'])
+@login_required
+@role_required('Admin')
+def update_invoice_draft(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    try:
+        save_invoice_draft(
+            invoice,
+            discount=request.form.get('discount', '0'),
+            due_date=request.form.get('due_date'),
+            notes=request.form.get('notes'),
+        )
+        log_activity('invoice_draft_updated', f'Updated draft {invoice.invoice_number}.', 'Invoice', invoice.id)
+        db.session.commit()
+        flash('Draft invoice updated.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>/item/manual', methods=['POST'])
+@login_required
+@role_required('Admin')
+def add_manual_invoice_item(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    try:
+        add_invoice_item(
+            invoice,
+            description=request.form.get('description'),
+            quantity=request.form.get('quantity', '1'),
+            unit_price=request.form.get('unit_price', '0'),
+        )
+        log_activity('invoice_item_added', f'Added manual charge to {invoice.invoice_number}.', 'Invoice', invoice.id)
+        db.session.commit()
+        flash('Charge added.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>/item/service', methods=['POST'])
+@login_required
+@role_required('Admin')
+def add_service_invoice_item(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    try:
+        add_service_to_invoice(
+            invoice,
+            request.form.get('service_id', type=int),
+            request.form.get('quantity', '1'),
+        )
+        log_activity('invoice_item_added', f'Added catalog service to {invoice.invoice_number}.', 'Invoice', invoice.id)
+        db.session.commit()
+        flash('Service charge added.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>/item/<int:item_id>/remove', methods=['POST'])
+@login_required
+@role_required('Admin')
+def remove_invoice_item(invoice_id, item_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    item = InvoiceItem.query.filter_by(id=item_id, invoice_id=invoice.id).first_or_404()
+    if invoice.status != 'Draft':
+        flash('Issued invoice charges can no longer be edited.', 'warning')
+        return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+    db.session.delete(item)
+    db.session.flush()
+    refresh_invoice_totals(invoice)
+    log_activity('invoice_item_removed', f'Removed a charge from {invoice.invoice_number}.', 'Invoice', invoice.id)
+    db.session.commit()
+    flash('Charge removed.', 'success')
+    return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>/issue', methods=['POST'])
+@login_required
+@role_required('Admin')
+def issue_invoice_route(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    try:
+        issue_invoice(invoice)
+        log_activity('invoice_issued', f'Issued {invoice.invoice_number} for ₹{invoice.total:.2f}.', 'Invoice', invoice.id)
+        notify_user(
+            invoice.patient_id, 'New hospital invoice',
+            f'{invoice.invoice_number} has been issued for ₹{invoice.total:.2f}. Outstanding balance: ₹{invoice.balance_due:.2f}.',
+            'info', f'/patient/billing/invoice/{invoice.id}',
+        )
+        db.session.commit()
+        flash(f'{invoice.invoice_number} issued to the patient.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>/payment', methods=['POST'])
+@login_required
+@role_required('Admin')
+def invoice_payment(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    try:
+        payment = record_payment(
+            invoice,
+            amount=request.form.get('amount'),
+            method=request.form.get('method', ''),
+            reference=request.form.get('reference'),
+            received_by_id=current_user.id,
+        )
+        log_activity('invoice_payment_recorded', f'Recorded ₹{payment.amount:.2f} payment on {invoice.invoice_number}.', 'Invoice', invoice.id)
+        notify_user(
+            invoice.patient_id, 'Payment recorded',
+            f'Payment of ₹{payment.amount:.2f} was recorded for {invoice.invoice_number}. Remaining balance: ₹{invoice.balance_due:.2f}.',
+            'success', f'/patient/billing/invoice/{invoice.id}',
+        )
+        db.session.commit()
+        flash('Payment recorded.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))
+
+
+@admin_bp.route('/billing/invoice/<int:invoice_id>/void', methods=['POST'])
+@login_required
+@role_required('Admin')
+def void_invoice_route(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    try:
+        void_invoice(invoice, request.form.get('reason'))
+        log_activity('invoice_voided', f'Voided {invoice.invoice_number}.', 'Invoice', invoice.id)
+        if invoice.issued_at:
+            notify_user(invoice.patient_id, 'Invoice voided', f'{invoice.invoice_number} has been voided by hospital billing.', 'warning', f'/patient/billing/invoice/{invoice.id}')
+        db.session.commit()
+        flash(f'{invoice.invoice_number} voided.', 'success')
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'warning')
+    return redirect(url_for('admin.invoice_detail', invoice_id=invoice.id))

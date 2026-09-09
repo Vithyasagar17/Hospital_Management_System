@@ -1,0 +1,44 @@
+{% extends 'layout.html' %}
+{% block title %}Departments{% endblock %}
+{% block page_title %}Departments{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><span class="hms-kicker">Hospital structure</span><h2 class="page-title">Clinical departments</h2><p class="page-subtitle">Organize doctors into operational units, assign leadership, and monitor department workload.</p></div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-4">
+    <div class="hms-panel h-100">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Create unit</span><h3>Add department</h3></div><i class="bi bi-building-add"></i></div>
+      <form method="POST"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3"><label class="form-label">Department name</label><input name="name" class="form-control" maxlength="120" required placeholder="e.g. Cardiology"></div>
+        <div class="mb-3"><label class="form-label">Code</label><input name="code" class="form-control text-uppercase" maxlength="20" required placeholder="CARD"></div>
+        <div class="mb-3"><label class="form-label">Location</label><input name="location" class="form-control" maxlength="120" placeholder="Block A · Floor 2"></div>
+        <div class="mb-3"><label class="form-label">Description</label><textarea name="description" class="form-control" rows="3" maxlength="500" placeholder="Scope of care and services..."></textarea></div>
+        <button class="btn btn-primary w-100"><i class="bi bi-plus-circle me-1"></i>Create department</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-xl-8">
+    <div class="hms-panel h-100">
+      <div class="hms-panel-head"><div><span class="hms-kicker">Directory</span><h3>Department registry</h3></div><i class="bi bi-buildings"></i></div>
+      <form method="GET" class="hms-filter-panel mb-3"><div class="row g-3 align-items-end"><div class="col-md-6"><label class="form-label">Search</label><input class="form-control" name="q" value="{{ q }}" placeholder="Name or code..."></div><div class="col-md-3"><label class="form-label">Status</label><select class="form-select" name="status"><option value="active" {% if status=='active' %}selected{% endif %}>Active</option><option value="inactive" {% if status=='inactive' %}selected{% endif %}>Inactive</option><option value="all" {% if status=='all' %}selected{% endif %}>All</option></select></div><div class="col-md-3 d-grid"><button class="btn btn-primary"><i class="bi bi-funnel me-1"></i>Filter</button></div></div></form>
+      <div class="hms-results-summary"><span><strong>{{ rows|length }}</strong> department{{ '' if rows|length == 1 else 's' }}</span>{% if q or status != 'active' %}<a href="{{ url_for('admin.departments') }}">Clear filters</a>{% endif %}</div>
+      {% if rows %}
+      <div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>Department</th><th>Head</th><th>Doctors</th><th>Appointments</th><th>Last 30d</th><th>Status</th><th></th></tr></thead><tbody>
+        {% for row in rows %}{% set d=row.department %}<tr>
+          <td><strong>{{ d.name }}</strong><br><small class="text-muted">{{ d.code }}{% if d.location %} · {{ d.location }}{% endif %}</small></td>
+          <td>{{ 'Dr. ' ~ d.head_doctor.name if d.head_doctor else '—' }}</td>
+          <td>{{ row.active_doctors }} active / {{ row.doctor_count }}</td>
+          <td>{{ row.appointment_count }}</td>
+          <td>{{ row.appointments_30d }}</td>
+          <td><span class="badge {{ 'bg-success' if d.is_active else 'bg-secondary' }}">{{ 'Active' if d.is_active else 'Inactive' }}</span></td>
+          <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.department_detail', department_id=d.id) }}">Open</a></td>
+        </tr>{% endfor %}
+      </tbody></table></div>
+      {% else %}<div class="hms-empty"><i class="bi bi-building-x"></i><p>No departments match these filters.</p></div>{% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

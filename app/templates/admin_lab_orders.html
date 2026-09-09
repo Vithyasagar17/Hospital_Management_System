@@ -1,0 +1,21 @@
+{% extends 'layout.html' %}
+{% block title %}Laboratory{% endblock %}{% block page_title %}Laboratory operations{% endblock %}
+{% block content %}
+<div class="page-header"><div><span class="hms-kicker">Diagnostics workflow</span><h2 class="page-title">Laboratory orders</h2><p class="page-subtitle">Track ordered tests from collection through processing and released results.</p></div><a class="btn btn-outline-primary" href="{{ url_for('admin.lab_catalog') }}"><i class="bi bi-list-check me-1"></i> Test catalog</a></div>
+<div class="row g-3 mb-4">
+  <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon warning"><i class="bi bi-clipboard2-pulse"></i></span><div><strong>{{ summary.ordered }}</strong><small>Ordered</small></div></div></div>
+  <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon info"><i class="bi bi-droplet"></i></span><div><strong>{{ summary.sample_collected }}</strong><small>Collected</small></div></div></div>
+  <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon primary"><i class="bi bi-activity"></i></span><div><strong>{{ summary.processing }}</strong><small>Processing</small></div></div></div>
+  <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon success"><i class="bi bi-file-earmark-check"></i></span><div><strong>{{ summary.completed }}</strong><small>Completed</small></div></div></div>
+  <div class="col-6 col-xl"><div class="hms-metric-card"><span class="hms-metric-icon info"><i class="bi bi-hourglass-split"></i></span><div><strong>{{ summary.open }}</strong><small>Open orders</small></div></div></div>
+</div>
+<form method="GET" class="hms-filter-panel mb-4"><div class="row g-3 align-items-end">
+  <div class="col-lg-5"><label class="form-label">Search</label><input name="q" class="form-control" value="{{ q }}" placeholder="Patient, doctor, test name or code..."></div>
+  <div class="col-sm-6 col-lg-3"><label class="form-label">Status</label><select name="status" class="form-select"><option value="all">All statuses</option>{% for s in statuses %}<option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
+  <div class="col-sm-6 col-lg-2"><label class="form-label">Priority</label><select name="priority" class="form-select"><option value="all">All</option>{% for p in priorities %}<option value="{{ p }}" {% if priority == p %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+  <div class="col-lg-2 d-grid"><button class="btn btn-primary">Apply</button></div>
+</div></form>
+{% if orders %}<div class="table-responsive"><table class="table table-hover"><thead><tr><th>Order</th><th>Patient</th><th>Doctor</th><th>Tests</th><th>Priority</th><th>Status</th><th>Ordered</th><th></th></tr></thead><tbody>
+{% for order in orders %}<tr><td>#{{ order.id }}</td><td>{{ order.patient.name or ('Patient #' ~ order.patient_id) }}</td><td>Dr. {{ order.doctor.name or order.doctor_id }}</td><td>{{ order.items|length }} · {{ order.items|map(attribute='test_name_snapshot')|join(', ')|truncate(55) }}</td><td><span class="badge {% if order.priority == 'STAT' %}bg-danger{% elif order.priority == 'Urgent' %}bg-warning{% else %}bg-secondary{% endif %}">{{ order.priority }}</span></td><td><span class="badge {% if order.status == 'Completed' %}bg-success{% elif order.status == 'Cancelled' %}bg-danger{% elif order.status == 'Processing' %}bg-primary{% else %}bg-info text-dark{% endif %}">{{ order.status }}</span></td><td>{{ order.ordered_at|local_datetime('%d %b %Y · %I:%M %p') }}</td><td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.lab_order_detail', order_id=order.id) }}">Open</a></td></tr>{% endfor %}
+</tbody></table></div>{% else %}<div class="hms-empty"><i class="bi bi-clipboard2-pulse"></i><p>No laboratory orders match these filters.</p></div>{% endif %}
+{% endblock %}

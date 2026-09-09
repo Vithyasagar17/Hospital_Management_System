@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import login_required, current_user
 from app.routes.auth_decorator import role_required
-from app.models import Patient, Doctor, Appointment, Specialization, DoctorAvailability, Prescription, AppointmentReminder, WaitlistEntry
+from app.models import Patient, Doctor, Appointment, Specialization, Department, DoctorAvailability, Prescription, AppointmentReminder, WaitlistEntry, Admission, LabOrder, LabOrderItem, Invoice
 from app import db
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
@@ -13,6 +13,7 @@ from app.scheduling import (
     has_active_doctor_conflict,
     has_active_patient_conflict,
 )
+from app.inpatient import active_admission_for_patient
 from app.waitlist import (
     active_waitlist_entry,
     claim_waitlist_offer,
@@ -39,6 +40,18 @@ def patient_dashboard():
     confirmed_count = base_query.filter_by(status='Confirmed').count()
     completed_count = base_query.filter_by(status='Completed').count()
 
+    current_admission = active_admission_for_patient(current_user.id)
+    open_lab_orders = LabOrder.query.filter(
+        LabOrder.patient_id == current_user.id,
+        LabOrder.status.in_(['Ordered', 'Sample Collected', 'Processing'])
+    ).count()
+    completed_lab_orders = LabOrder.query.filter_by(patient_id=current_user.id, status='Completed').count()
+    open_invoices = Invoice.query.filter(
+        Invoice.patient_id == current_user.id,
+        Invoice.status.in_(['Issued', 'Partially Paid'])
+    ).all()
+    outstanding_balance = sum((invoice.balance_due or 0 for invoice in open_invoices), 0)
+
     status_counts = {
         status: base_query.filter_by(status=status).count()
         for status in ['Pending', 'Confirmed', 'Completed', 'Cancelled', 'No Show']
@@ -46,7 +59,10 @@ def patient_dashboard():
     return render_template(
         'patient_dashboard.html', patient_name=patient_name, upcoming=upcoming,
         pending_count=pending_count, confirmed_count=confirmed_count,
-        completed_count=completed_count, status_counts=status_counts
+        completed_count=completed_count, status_counts=status_counts,
+        current_admission=current_admission, open_lab_orders=open_lab_orders,
+        completed_lab_orders=completed_lab_orders, open_invoice_count=len(open_invoices),
+        outstanding_balance=outstanding_balance
     )
 
 
@@ -104,6 +120,95 @@ def medical_history():
         .order_by(Appointment.date.desc())\
         .all()
     return render_template('medical_history.html', appointments=appointments)
+
+@patient_bp.route('/admissions')
+@login_required
+@role_required('Patient')
+def admissions():
+    rows = Admission.query.filter_by(patient_id=current_user.id).order_by(Admission.admitted_at.desc()).all()
+    return render_template('patient_admissions.html', admissions=rows)
+
+
+@patient_bp.route('/admission/<int:admission_id>')
+@login_required
+@role_required('Patient')
+def admission_detail(admission_id):
+    admission = Admission.query.get_or_404(admission_id)
+    if admission.patient_id != current_user.id:
+        abort(403)
+    transfers = sorted(admission.transfers, key=lambda item: item.transferred_at, reverse=True)
+    return render_template(
+        'inpatient_admission_detail.html', admission=admission, transfers=transfers,
+        transfer_beds=[], viewer_role='Patient', transfer_url=None, discharge_url=None,
+        back_url=url_for('patient.admissions'),
+    )
+
+
+
+@patient_bp.route('/laboratory')
+@login_required
+@role_required('Patient')
+def laboratory():
+    status = request.args.get('status', 'all')
+    q = request.args.get('q', '').strip()
+    query = LabOrder.query.join(Doctor, LabOrder.doctor_id == Doctor.id).filter(
+        LabOrder.patient_id == current_user.id
+    )
+    valid_statuses = {'Ordered', 'Sample Collected', 'Processing', 'Completed', 'Cancelled'}
+    if status in valid_statuses:
+        query = query.filter(LabOrder.status == status)
+    if q:
+        query = query.filter(or_(
+            Doctor.name.ilike(f'%{q}%'),
+            LabOrder.items.any(LabOrderItem.test_name_snapshot.ilike(f'%{q}%')),
+            LabOrder.items.any(LabOrderItem.test_code_snapshot.ilike(f'%{q}%')),
+        ))
+    orders = query.order_by(LabOrder.ordered_at.desc(), LabOrder.id.desc()).all()
+    return render_template('patient_lab_orders.html', orders=orders, status=status, q=q)
+
+
+@patient_bp.route('/laboratory/order/<int:order_id>')
+@login_required
+@role_required('Patient')
+def lab_order_detail(order_id):
+    order = LabOrder.query.get_or_404(order_id)
+    if order.patient_id != current_user.id:
+        abort(403)
+    return render_template(
+        'lab_order_detail.html', order=order, viewer_role='Patient',
+        back_url=url_for('patient.laboratory'), statuses=(), interpretations=(),
+        transition_url=None, results_url=None, cancel_url=None,
+    )
+
+
+@patient_bp.route('/billing')
+@login_required
+@role_required('Patient')
+def billing():
+    status = request.args.get('status', 'all')
+    query = Invoice.query.filter(
+        Invoice.patient_id == current_user.id,
+        Invoice.status != 'Draft',
+    )
+    if status in {'Issued', 'Partially Paid', 'Paid', 'Void'}:
+        query = query.filter(Invoice.status == status)
+    invoices = query.order_by(Invoice.created_at.desc()).all()
+    outstanding = sum((invoice.balance_due or 0 for invoice in invoices if invoice.status in ('Issued', 'Partially Paid')), 0)
+    return render_template('patient_billing.html', invoices=invoices, status=status, outstanding=outstanding)
+
+
+@patient_bp.route('/billing/invoice/<int:invoice_id>')
+@login_required
+@role_required('Patient')
+def invoice_detail(invoice_id):
+    invoice = Invoice.query.get_or_404(invoice_id)
+    if invoice.patient_id != current_user.id or invoice.status == 'Draft':
+        abort(403)
+    return render_template(
+        'invoice_detail.html', invoice=invoice, viewer_role='Patient', services=[],
+        payment_methods=(), back_url=url_for('patient.billing'),
+    )
+
 
 @patient_bp.route('/book_appointment', methods=['GET', 'POST'])
 @login_required
@@ -238,13 +343,20 @@ def prescription_detail(prescription_id):
 def search_doctors():
     q = request.args.get('q', '').strip()
     specialization_id = request.args.get('specialization_id', type=int)
+    department_id = request.args.get('department_id', type=int)
     available_on_raw = request.args.get('available_on', '').strip()
 
     query = Doctor.query.filter(Doctor.is_blacklisted.is_(False))
     if q:
-        query = query.filter(or_(Doctor.name.ilike(f'%{q}%'), Doctor.specialization.has(Specialization.name.ilike(f'%{q}%'))))
+        query = query.filter(or_(
+            Doctor.name.ilike(f'%{q}%'),
+            Doctor.specialization.has(Specialization.name.ilike(f'%{q}%')),
+            Doctor.department.has(Department.name.ilike(f'%{q}%')),
+        ))
     if specialization_id:
         query = query.filter(Doctor.specialization_id == specialization_id)
+    if department_id:
+        query = query.filter(Doctor.department_id == department_id)
 
     doctors = query.order_by(Doctor.name).all()
     available_slots = {}
@@ -269,8 +381,10 @@ def search_doctors():
         doctors = filtered
 
     specializations = Specialization.query.order_by(Specialization.name).all()
+    departments = Department.query.filter_by(is_active=True).order_by(Department.name).all()
     return render_template('patient_search_doctors.html', doctors=doctors, query=q,
                            specialization_id=specialization_id, specializations=specializations,
+                           department_id=department_id, departments=departments,
                            available_on=available_on_raw, available_slots=available_slots,
                            waitlistable=waitlistable)
 
