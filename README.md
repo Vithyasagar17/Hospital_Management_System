@@ -193,3 +193,14 @@ See `PHASE6_UPGRADE_NOTES.md` for the Phase 6A, 6B.1 and 6B.2 demo flows.
 - Migration-driven local database reset/seed workflow
 
 See `PHASE7_UPGRADE_NOTES.md` before adopting Alembic on an existing Phase 6 SQLite database.
+
+## Phase 7C background processing
+
+- Redis-backed Celery worker and Celery Beat scheduler
+- Automatic appointment-reminder processing
+- Automatic waitlist offer expiry and next-patient promotion
+- Optional Doctor reminder and email delivery flags
+- Generic asynchronous email task for future transactional-email migration
+- Docker Compose services for `redis`, `worker`, and `beat`
+
+See `PHASE7C_UPGRADE_NOTES.md` for configuration, operations, and verification commands.

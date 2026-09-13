@@ -15,3 +15,5 @@ Flask-Migrate==4.1.0
 alembic>=1.14,<2
 psycopg[binary]>=3.2,<4
 tzdata
+celery>=5.4,<6
+redis>=5,<6
