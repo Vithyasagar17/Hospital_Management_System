@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-medora_hms}
+      POSTGRES_USER: ${POSTGRES_USER:-medora_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medora_dev_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - medora_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      HMS_ENV: ${HMS_ENV:-development}
+      HMS_DATABASE_URL: postgresql://${POSTGRES_USER:-medora_user}:${POSTGRES_PASSWORD:-medora_dev_password}@db:5432/${POSTGRES_DB:-medora_hms}
+      HMS_SECRET_KEY: ${HMS_SECRET_KEY:-change-me-before-production}
+      HMS_COOKIE_SECURE: ${HMS_COOKIE_SECURE:-0}
+      HMS_TIMEZONE: ${HMS_TIMEZONE:-Asia/Kolkata}
+      HMS_RUN_MIGRATIONS: ${HMS_RUN_MIGRATIONS:-1}
+      HMS_MAIL_MODE: ${HMS_MAIL_MODE:-console}
+      HMS_SMTP_SERVER: ${HMS_SMTP_SERVER:-}
+      HMS_SMTP_PORT: ${HMS_SMTP_PORT:-587}
+      HMS_SMTP_USERNAME: ${HMS_SMTP_USERNAME:-}
+      HMS_SMTP_PASSWORD: ${HMS_SMTP_PASSWORD:-}
+      HMS_SMTP_FROM: ${HMS_SMTP_FROM:-}
+      HMS_SMTP_USE_TLS: ${HMS_SMTP_USE_TLS:-1}
+      HMS_SMTP_USE_SSL: ${HMS_SMTP_USE_SSL:-0}
+      PORT: 8000
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+      GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-60}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/login', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  medora_postgres_data:
