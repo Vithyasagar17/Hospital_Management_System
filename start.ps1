@@ -1,6 +1,7 @@
 param(
     [switch]$Install,
     [switch]$CreateDB,
+    [switch]$Migrate,
     [switch]$Run
 )
 
@@ -22,13 +23,17 @@ if ($Install) {
 }
 
 # Safe default: start the app without deleting the existing database.
-if (-not ($CreateDB -or $Run)) {
+if (-not ($CreateDB -or $Migrate -or $Run)) {
     $Run = $true
 }
 
 if ($CreateDB) {
     Write-Warning 'create_db.py resets instance/hms.db. Existing data will be deleted.'
     python create_db.py
+}
+
+if ($Migrate) {
+    python -m flask --app run db upgrade
 }
 
 if ($Run) {

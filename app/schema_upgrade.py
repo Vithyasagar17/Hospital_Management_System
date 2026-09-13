@@ -4,8 +4,16 @@ from app import db
 
 
 def _columns(table_name):
-    rows = db.session.execute(text(f"PRAGMA table_info('{table_name}')")).fetchall()
-    return {row[1] for row in rows}
+    inspector = inspect(db.engine)
+    return {column['name'] for column in inspector.get_columns(table_name)}
+
+
+def _require_legacy_sqlite():
+    if db.engine.dialect.name != 'sqlite':
+        raise RuntimeError(
+            'The legacy schema upgrader is SQLite-only. Use Alembic (`flask db upgrade`) '
+            'for PostgreSQL and all Phase 7+ environments.'
+        )
 
 
 def _add_columns(table_name, additions):
@@ -109,7 +117,8 @@ def ensure_phase5_schema():
 
 
 def ensure_phase6_schema():
-    """Add Phase 6 hospital operations structure without resetting Phase 5 data."""
+    """Legacy SQLite compatibility path for pre-Alembic Phase 1-6 databases."""
+    _require_legacy_sqlite()
     inspector = inspect(db.engine)
     fresh_database = not inspector.has_table('user')
 

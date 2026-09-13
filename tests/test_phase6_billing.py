@@ -8,6 +8,7 @@ from app.models import (
     LabTest, Patient, User, Ward,
 )
 from tests.conftest import login
+from app.timeutils import utc_now
 
 
 def _ids(app):
@@ -33,7 +34,7 @@ def test_completed_appointment_invoice_imports_consultation_and_lab_price_snapsh
         db.session.flush()
         order = LabOrder(
             patient_id=ids['patient'], doctor_id=ids['doctor'], appointment_id=appointment.id,
-            priority='Routine', status='Completed', completed_at=datetime.utcnow(),
+            priority='Routine', status='Completed', completed_at=utc_now(),
         )
         db.session.add(order)
         db.session.flush()
@@ -122,7 +123,7 @@ def test_discharged_admission_invoice_adds_room_charge(app):
         admission = Admission(
             patient_id=ids['patient'], doctor_id=ids['doctor'], department_id=department.id,
             ward_id=ward.id, bed_id=bed.id, reason='Observation', status='Discharged',
-            admitted_at=datetime.utcnow() - timedelta(hours=30), discharged_at=datetime.utcnow(),
+            admitted_at=utc_now() - timedelta(hours=30), discharged_at=utc_now(),
             discharge_summary='Stable', room_rate_snapshot=Decimal('2000.00'),
         )
         db.session.add(admission); db.session.commit()
@@ -140,7 +141,7 @@ def test_patient_cannot_view_another_patients_invoice(app, client):
         invoice.status = 'Issued'
         invoice.total = Decimal('100.00')
         invoice.balance_due = Decimal('100.00')
-        invoice.issued_at = datetime.utcnow()
+        invoice.issued_at = utc_now()
         db.session.commit()
         invoice_id = invoice.id
 

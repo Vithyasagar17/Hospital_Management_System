@@ -15,6 +15,7 @@ from app.models import (
     Admission, Appointment, BillingService, Invoice, InvoiceItem, LabOrder,
     LabOrderItem, Patient, Payment,
 )
+from app.timeutils import utc_now
 
 INVOICE_STATUSES = ('Draft', 'Issued', 'Partially Paid', 'Paid', 'Void')
 PAYMENT_METHODS = ('Cash', 'Card', 'UPI', 'Bank Transfer', 'Insurance', 'Other')
@@ -57,7 +58,7 @@ def refresh_invoice_totals(invoice):
     if invoice.status not in ('Draft', 'Void'):
         if total > 0 and paid >= total:
             invoice.status = 'Paid'
-            invoice.paid_at = invoice.paid_at or datetime.utcnow()
+            invoice.paid_at = invoice.paid_at or utc_now()
         elif paid > 0:
             invoice.status = 'Partially Paid'
             invoice.paid_at = None
@@ -194,7 +195,7 @@ def _populate_appointment_charges(invoice, appointment):
 
 def _admission_room_charge(admission):
     """Return total inpatient room charge and a human-readable breakdown."""
-    end_at = admission.discharged_at or datetime.utcnow()
+    end_at = admission.discharged_at or utc_now()
     transfers = sorted(admission.transfers, key=lambda row: row.transferred_at)
     segments = []
     start_at = admission.admitted_at
@@ -279,9 +280,9 @@ def issue_invoice(invoice):
     if money(invoice.total) <= 0:
         raise ValueError('Invoice total must be greater than zero before issue.')
     invoice.status = 'Issued'
-    invoice.issued_at = datetime.utcnow()
+    invoice.issued_at = utc_now()
     if not invoice.due_at:
-        invoice.due_at = datetime.utcnow() + timedelta(days=14)
+        invoice.due_at = utc_now() + timedelta(days=14)
     refresh_invoice_totals(invoice)
     return invoice
 
@@ -304,7 +305,7 @@ def record_payment(invoice, *, amount, method, reference=None, received_by_id=No
         method=method,
         reference=(reference or '').strip() or None,
         received_by_id=received_by_id,
-        received_at=datetime.utcnow(),
+        received_at=utc_now(),
     )
     db.session.add(payment)
     db.session.flush()
@@ -318,7 +319,7 @@ def void_invoice(invoice, reason=None):
     if invoice.payments:
         raise ValueError('Invoices with payments cannot be voided.')
     invoice.status = 'Void'
-    invoice.voided_at = datetime.utcnow()
+    invoice.voided_at = utc_now()
     invoice.void_reason = (reason or '').strip() or None
     invoice.balance_due = Decimal('0.00')
     db.session.flush()
@@ -326,7 +327,7 @@ def void_invoice(invoice, reason=None):
 
 
 def billing_summary(days=30):
-    start = datetime.utcnow() - timedelta(days=days)
+    start = utc_now() - timedelta(days=days)
     active = Invoice.query.filter(Invoice.status.in_(['Issued', 'Partially Paid', 'Paid'])).all()
     outstanding = sum((money(row.balance_due) for row in active), Decimal('0.00'))
     payments = Payment.query.filter(Payment.received_at >= start).all()

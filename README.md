@@ -10,6 +10,7 @@ python -m venv .venv
 python -m ensurepip --upgrade
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python -m flask --app run db upgrade
 python run.py
 ```
 
@@ -19,15 +20,21 @@ Open: http://127.0.0.1:5000
 
 ## Database
 
-The ZIP already includes an SQLite database. You do **not** need to run `create_db.py` just to start the app.
+Phase 7A uses **Alembic/Flask-Migrate** as the schema source of truth. SQLite remains the zero-configuration local default, while PostgreSQL is supported through `HMS_DATABASE_URL` or `DATABASE_URL`.
 
-To intentionally reset everything to seeded demo data:
+For a fresh database:
+
+```powershell
+python -m flask --app run db upgrade
+```
+
+To intentionally reset and seed the **local SQLite demo database**:
 
 ```powershell
 python create_db.py
 ```
 
-This deletes/recreates `instance/hms.db`, seeds the accounts below, and publishes sample doctor availability for the coming week.
+`create_db.py` is intentionally blocked for PostgreSQL. Existing Phase 6 SQLite databases need a one-time Alembic stamp before the first Phase 7 upgrade; see `PHASE7_UPGRADE_NOTES.md`.
 
 ### Seeded accounts
 
@@ -173,3 +180,16 @@ See `PHASE6_UPGRADE_NOTES.md` for the Phase 6A, 6B.1 and 6B.2 demo flows.
 - Patient bills/payment portal, outstanding-balance visibility, notifications, and printable invoices
 - Admin receivables dashboard for outstanding value, 30-day collections, issued value, unpaid bills, and drafts
 - Additive schema upgrade with no database reset
+
+
+## Phase 7A production database engineering
+
+- PostgreSQL support via `HMS_DATABASE_URL` / `DATABASE_URL` and psycopg 3
+- Flask-Migrate/Alembic schema ownership with an immutable Phase 6 baseline
+- Runtime schema mutation disabled by default; legacy SQLite upgrade path is opt-in only
+- Composite indexes for scheduling, admissions, lab operations, billing, reminders, waitlists, and audit queries
+- SQLAlchemy 2.x lookup modernization (`db.session.get`)
+- Centralized UTC timestamp helper replacing deprecated `datetime.utcnow()` calls
+- Migration-driven local database reset/seed workflow
+
+See `PHASE7_UPGRADE_NOTES.md` before adopting Alembic on an existing Phase 6 SQLite database.

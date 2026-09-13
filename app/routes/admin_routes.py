@@ -24,6 +24,7 @@ from app.billing import (
 )
 from datetime import datetime, timedelta
 from sqlalchemy.exc import IntegrityError
+from app.timeutils import utc_now
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -65,7 +66,7 @@ def admin_dashboard():
 
     recent_appointments = Appointment.query.order_by(Appointment.created_at.desc()).limit(6).all()
     recent_audit = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(6).all()
-    audit_24h = AuditLog.query.filter(AuditLog.created_at >= datetime.utcnow() - timedelta(hours=24)).count()
+    audit_24h = AuditLog.query.filter(AuditLog.created_at >= utc_now() - timedelta(hours=24)).count()
     week_appointments = Appointment.query.filter(
         Appointment.date >= datetime.combine(week_start, datetime.min.time()),
         Appointment.date < datetime.combine(tomorrow, datetime.min.time())

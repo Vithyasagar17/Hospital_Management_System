@@ -14,6 +14,7 @@ from app.laboratory import (
     LAB_ORDER_STATUSES, LAB_PRIORITIES, active_lab_tests, create_lab_order,
     doctor_patient_ids, lab_order_summary, transition_lab_order,
 )
+from app.timeutils import utc_now
 
 
 doctor_bp = Blueprint('doctor', __name__, url_prefix='/doctor')
@@ -615,7 +616,7 @@ def edit_prescription(prescription_id):
     prescription.diagnosis = diagnosis
     prescription.advice = advice or None
     prescription.follow_up_date = follow_up_date
-    prescription.updated_at = datetime.utcnow()
+    prescription.updated_at = utc_now()
     log_activity('prescription_updated', f'Updated prescription #{prescription.id}.', 'Prescription', prescription.id)
     db.session.commit()
     flash('Prescription summary updated.', 'success')
@@ -649,7 +650,7 @@ def delete_prescription(prescription_id):
 
     appointment_id = prescription.appointment_id
     prescription.is_deleted = True
-    prescription.deleted_at = datetime.utcnow()
+    prescription.deleted_at = utc_now()
     prescription.deleted_by = current_user.id
     log_activity('prescription_archived', f'Archived prescription #{prescription_id} for appointment #{appointment_id}.', 'Appointment', appointment_id)
     db.session.commit()
@@ -664,7 +665,7 @@ def waitlist():
         WaitlistEntry.doctor_id == current_user.id,
         WaitlistEntry.status.in_(['Waiting', 'Offered']),
     ).order_by(WaitlistEntry.target_date.asc(), WaitlistEntry.created_at.asc()).all()
-    return render_template('doctor_waitlist.html', entries=entries, now_utc=datetime.utcnow())
+    return render_template('doctor_waitlist.html', entries=entries, now_utc=utc_now())
 
 
 @doctor_bp.route('/appointment/<int:appointment_id>/update', methods=['POST'])
@@ -700,9 +701,9 @@ def update_appointment_status(appointment_id):
     appointment.status = status
     if notes:
         appointment.notes = notes
-    appointment.updated_at = datetime.utcnow()
+    appointment.updated_at = utc_now()
     if status == 'No Show':
-        appointment.no_show_at = datetime.utcnow()
+        appointment.no_show_at = utc_now()
     doctor_name = appointment.doctor.name if appointment.doctor else current_user.username
     log_activity('appointment_status_changed', f'Appointment #{appointment.id}: {previous_status} → {status}.', 'Appointment', appointment.id)
     notify_user(appointment.patient_id, f'Appointment {status.lower()}', f'Dr. {doctor_name} marked your appointment on {appointment.date.strftime("%d %b %Y at %I:%M %p")} as {status.lower()}.', 'success' if status in ['Confirmed', 'Completed'] else 'warning', f'/patient/appointment/{appointment.id}')
@@ -722,7 +723,7 @@ def update_appointment_notes(appointment_id):
     if appointment.doctor_id != current_user.id:
         abort(403)
     appointment.notes = request.form.get('notes', '').strip() or None
-    appointment.updated_at = datetime.utcnow()
+    appointment.updated_at = utc_now()
     log_activity('consultation_notes_updated', f'Updated consultation notes for appointment #{appointment.id}.', 'Appointment', appointment.id)
     db.session.commit()
     flash('Consultation notes saved.', 'success')

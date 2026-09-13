@@ -24,6 +24,8 @@ migrate = Migrate()
 
 def create_app(test_config=None):
     app = Flask(__name__, instance_relative_config=True)
+    from app.db_config import resolve_database_uri
+    database_uri = resolve_database_uri(app.instance_path)
 
     app.config.from_mapping(
         SECRET_KEY=os.environ.get(
@@ -31,11 +33,10 @@ def create_app(test_config=None):
             "dev-only-change-me-before-deploying"
         ),
 
-        SQLALCHEMY_DATABASE_URI=(
-            "sqlite:///" + os.path.join(app.instance_path, "hms.db")
-        ),
-
+        SQLALCHEMY_DATABASE_URI=database_uri,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        SQLALCHEMY_ENGINE_OPTIONS={'pool_pre_ping': True},
+        LEGACY_SCHEMA_UPGRADE=os.environ.get('HMS_LEGACY_SCHEMA_UPGRADE', '0') == '1',
 
         # Session security
         SESSION_COOKIE_HTTPONLY=True,
@@ -138,7 +139,7 @@ def create_app(test_config=None):
     )
 
     db.init_app(app)
-    migrate.init_app(app, db)
+    migrate.init_app(app, db, compare_type=True, render_as_batch=True)
 
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"
@@ -166,9 +167,12 @@ def create_app(test_config=None):
     # DATABASE SCHEMA UPGRADE
     # ---------------------------------------------------------
 
-    with app.app_context():
-        from app.schema_upgrade import ensure_phase6_schema
-        ensure_phase6_schema()
+    # Phase 7A moves schema ownership to Alembic.
+    # The old upgrader is retained only for legacy SQLite databases.
+    if app.config.get('LEGACY_SCHEMA_UPGRADE'):
+        with app.app_context():
+            from app.schema_upgrade import ensure_phase6_schema
+            ensure_phase6_schema()
 
     # ---------------------------------------------------------
     # CSRF SECURITY

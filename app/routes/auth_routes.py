@@ -5,6 +5,7 @@ from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy import or_
 
 from app import db
+from app.timeutils import utc_now
 from app.activity import log_activity, notify_role
 from app.models import Doctor, LoginAttempt, Notification, Patient, Specialization, User
 from app.security import (
@@ -28,7 +29,7 @@ def _account_blacklisted(user):
 
 def _record_login_attempt(username, success):
     uname = (username or '').lower()[:100]
-    LoginAttempt.query.filter(LoginAttempt.attempted_at < datetime.utcnow() - timedelta(days=2)).delete(synchronize_session=False)
+    LoginAttempt.query.filter(LoginAttempt.attempted_at < utc_now() - timedelta(days=2)).delete(synchronize_session=False)
     if success:
         LoginAttempt.query.filter_by(username=uname, success=False).delete(synchronize_session=False)
     db.session.add(LoginAttempt(
@@ -72,7 +73,7 @@ def login():
             )
             return render_template('login.html'), 429
 
-        if user and user.locked_until and user.locked_until > datetime.utcnow():
+        if user and user.locked_until and user.locked_until > utc_now():
             flash('Too many failed attempts. This account is temporarily locked.', 'danger')
             return render_template('login.html'), 429
 
@@ -82,7 +83,7 @@ def login():
             if user:
                 user.failed_login_count = (user.failed_login_count or 0) + 1
                 if user.failed_login_count >= 5:
-                    user.locked_until = datetime.utcnow() + timedelta(minutes=int(current_app.config.get('LOGIN_LOCK_MINUTES', 15)))
+                    user.locked_until = utc_now() + timedelta(minutes=int(current_app.config.get('LOGIN_LOCK_MINUTES', 15)))
                     user.failed_login_count = 0
                     log_activity('account_temporarily_locked', f'Account {user.username} locked after repeated failed sign-ins.', 'User', user.id, actor=user)
             db.session.commit()
@@ -100,7 +101,7 @@ def login():
         _record_login_attempt(username, True)
         user.failed_login_count = 0
         user.locked_until = None
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = utc_now()
         session.clear()
         login_user(user)
         session['session_version'] = user.session_version

@@ -1,0 +1,12 @@
+Phase 7A migrates schema ownership to Flask-Migrate/Alembic.
+
+Fresh database:
+    flask --app run db upgrade
+
+Existing Phase 6 SQLite database:
+    1. Back up instance/hms.db.
+    2. flask --app run db stamp 20260910_0001
+    3. flask --app run db upgrade
+
+Do not stamp an empty PostgreSQL database. Fresh PostgreSQL databases must run
+`db upgrade` from the beginning so the baseline schema is created.

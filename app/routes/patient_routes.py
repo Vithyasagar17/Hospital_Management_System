@@ -20,6 +20,7 @@ from app.waitlist import (
     is_waitlistable_day,
     offer_released_slot,
 )
+from app.timeutils import utc_now
 
 patient_bp = Blueprint('patient', __name__, url_prefix='/patient')
 
@@ -461,8 +462,8 @@ def reschedule_appointment(appointment_id):
         appointment.time = time_str
         appointment.status = 'Pending'
         appointment.reschedule_count = (appointment.reschedule_count or 0) + 1
-        appointment.last_rescheduled_at = datetime.utcnow()
-        appointment.updated_at = datetime.utcnow()
+        appointment.last_rescheduled_at = utc_now()
+        appointment.updated_at = utc_now()
 
         patient_name = appointment.patient.name if appointment.patient and appointment.patient.name else current_user.username
         doctor_name = doctor.name if doctor and doctor.name else 'Doctor'
@@ -499,7 +500,7 @@ def reschedule_appointment(appointment_id):
 def waitlist():
     entries = WaitlistEntry.query.filter_by(patient_id=current_user.id)\
         .order_by(WaitlistEntry.created_at.desc(), WaitlistEntry.id.desc()).all()
-    return render_template('waitlist.html', entries=entries, now_utc=datetime.utcnow())
+    return render_template('waitlist.html', entries=entries, now_utc=utc_now())
 
 
 @patient_bp.route('/waitlist/join', methods=['GET', 'POST'])
@@ -570,7 +571,7 @@ def waitlist_entry(entry_id):
     entry = WaitlistEntry.query.get_or_404(entry_id)
     if entry.patient_id != current_user.id:
         abort(403)
-    return render_template('waitlist_detail.html', entry=entry, now_utc=datetime.utcnow())
+    return render_template('waitlist_detail.html', entry=entry, now_utc=utc_now())
 
 
 @patient_bp.route('/waitlist/<int:entry_id>/claim', methods=['POST'])
@@ -603,7 +604,7 @@ def cancel_waitlist(entry_id):
 
     released_offer = entry.offered_slot if entry.status == 'Offered' else None
     entry.status = 'Cancelled'
-    entry.updated_at = datetime.utcnow()
+    entry.updated_at = utc_now()
     log_activity('waitlist_cancelled', f'Cancelled waitlist entry #{entry.id}.', 'WaitlistEntry', entry.id)
     db.session.flush()
     if released_offer:
@@ -631,7 +632,7 @@ def cancel_appointment(appointment_id):
         return redirect(url_for('patient.view_appointments'))
 
     appointment.status = 'Cancelled'
-    appointment.updated_at = datetime.utcnow()
+    appointment.updated_at = utc_now()
     patient_name = appointment.patient.name if appointment.patient and appointment.patient.name else current_user.username
     log_activity('appointment_cancelled', f'Cancelled appointment #{appointment.id}.', 'Appointment', appointment.id)
     notify_user(appointment.doctor_id, 'Appointment cancelled', f'{patient_name} cancelled the appointment on {appointment.date.strftime("%d %b %Y at %I:%M %p")}.', 'warning', f'/doctor/appointment/{appointment.id}')
