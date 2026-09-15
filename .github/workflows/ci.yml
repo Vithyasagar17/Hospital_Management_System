@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python tests + migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: medora_ci
+          POSTGRES_USER: medora_ci
+          POSTGRES_PASSWORD: medora_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U medora_ci -d medora_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      HMS_ENV: development
+      HMS_DATABASE_URL: postgresql://medora_ci:medora_ci_password@127.0.0.1:5432/medora_ci
+      HMS_SECRET_KEY: ci-only-secret-key-not-for-production-0123456789
+      HMS_COOKIE_SECURE: '0'
+      HMS_TIMEZONE: Asia/Kolkata
+      HMS_MAIL_MODE: console
+      HMS_RUN_MIGRATIONS: '0'
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/0
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/1
+      HMS_BACKGROUND_REMIND_DOCTORS: '0'
+      HMS_BACKGROUND_SEND_REMINDER_EMAILS: '0'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            requirements-prod.txt
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          if [ -f requirements-dev.txt ]; then
+            python -m pip install -r requirements-dev.txt
+          fi
+
+      - name: Compile Python sources
+        shell: bash
+        run: |
+          python -m compileall -q app tests run.py celery_worker.py
+
+      - name: Upgrade fresh PostgreSQL database
+        run: python -m flask --app run db upgrade
+
+      - name: Verify Alembic revision
+        shell: bash
+        run: |
+          python -m flask --app run db current
+          python -m flask --app run db heads
+
+      - name: Run test suite
+        run: python -m pytest -q
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate Docker Compose
+        run: docker compose config --quiet
+
+      - name: Build production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: false
+          tags: medora-hms:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
