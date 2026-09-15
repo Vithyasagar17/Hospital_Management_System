@@ -1,0 +1,171 @@
+# Medora HMS — Phase 7F production deployment blueprint for Render.
+# Production intentionally uses paid services so pre-deploy migrations,
+# persistent Key Value storage, and always-on background workers are available.
+
+previews:
+  generation: off
+
+services:
+  - type: keyvalue
+    name: medora-kv
+    region: singapore
+    plan: 256mb
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+    persistenceMode: journal-snapshot
+
+  - type: web
+    name: medora-web
+    runtime: docker
+    branch: main
+    region: singapore
+    plan: 0.5c-512mb
+    autoDeployTrigger: checksPass
+    healthCheckPath: /health/ready
+    maxShutdownDelaySeconds: 60
+    preDeployCommand: python -m flask --app run db upgrade
+    envVars:
+      - key: HMS_ENV
+        value: production
+      - key: HMS_DATABASE_URL
+        fromDatabase:
+          name: medora-postgres
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: keyvalue
+          name: medora-kv
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: keyvalue
+          name: medora-kv
+          property: connectionString
+      - key: HMS_SECRET_KEY
+        generateValue: true
+      - key: HMS_COOKIE_SECURE
+        value: "1"
+      - key: HMS_TIMEZONE
+        value: Asia/Kolkata
+      - key: HMS_RUN_MIGRATIONS
+        value: "0"
+      - key: HMS_SERVICE_NAME
+        value: web
+      - key: HMS_LOG_FORMAT
+        value: json
+      - key: HMS_LOG_LEVEL
+        value: INFO
+      - key: HMS_LOG_HEALTH_REQUESTS
+        value: "0"
+      - key: HMS_HEALTH_REQUIRE_REDIS
+        value: "1"
+      - key: HMS_METRICS_ENABLED
+        value: "0"
+      - key: HMS_MAIL_MODE
+        value: console
+      - key: GUNICORN_WORKERS
+        value: "2"
+      - key: GUNICORN_THREADS
+        value: "4"
+      - key: GUNICORN_TIMEOUT
+        value: "60"
+
+  - type: worker
+    name: medora-worker
+    runtime: docker
+    branch: main
+    region: singapore
+    plan: 0.5c-512mb
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 60
+    dockerCommand: celery -A celery_worker:celery_app worker --loglevel=INFO --concurrency=2
+    envVars:
+      - key: HMS_ENV
+        value: production
+      - key: HMS_DATABASE_URL
+        fromDatabase:
+          name: medora-postgres
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: keyvalue
+          name: medora-kv
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: keyvalue
+          name: medora-kv
+          property: connectionString
+      - key: HMS_SECRET_KEY
+        generateValue: true
+      - key: HMS_COOKIE_SECURE
+        value: "1"
+      - key: HMS_TIMEZONE
+        value: Asia/Kolkata
+      - key: HMS_RUN_MIGRATIONS
+        value: "0"
+      - key: HMS_SERVICE_NAME
+        value: worker
+      - key: HMS_LOG_FORMAT
+        value: json
+      - key: HMS_LOG_LEVEL
+        value: INFO
+      - key: HMS_BACKGROUND_REMIND_DOCTORS
+        value: "0"
+      - key: HMS_BACKGROUND_SEND_REMINDER_EMAILS
+        value: "0"
+
+  - type: worker
+    name: medora-beat
+    runtime: docker
+    branch: main
+    region: singapore
+    plan: 0.5c-512mb
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 60
+    dockerCommand: celery -A celery_worker:celery_app beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
+    envVars:
+      - key: HMS_ENV
+        value: production
+      - key: HMS_DATABASE_URL
+        fromDatabase:
+          name: medora-postgres
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: keyvalue
+          name: medora-kv
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: keyvalue
+          name: medora-kv
+          property: connectionString
+      - key: HMS_SECRET_KEY
+        generateValue: true
+      - key: HMS_COOKIE_SECURE
+        value: "1"
+      - key: HMS_TIMEZONE
+        value: Asia/Kolkata
+      - key: HMS_RUN_MIGRATIONS
+        value: "0"
+      - key: HMS_SERVICE_NAME
+        value: beat
+      - key: HMS_LOG_FORMAT
+        value: json
+      - key: HMS_LOG_LEVEL
+        value: INFO
+      - key: CELERY_REMINDER_INTERVAL_SECONDS
+        value: "300"
+      - key: CELERY_WAITLIST_INTERVAL_SECONDS
+        value: "60"
+
+databases:
+  - name: medora-postgres
+    region: singapore
+    plan: 0.5c-1g
+    postgresMajorVersion: "16"
+    diskSizeGB: 15
+    storageAutoscalingEnabled: true
+    connectionPool: none
+    ipAllowList: []

@@ -8,7 +8,7 @@ rescheduling.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import click
 from flask import current_app
@@ -18,14 +18,10 @@ from app import db
 from app.activity import notify_user
 from app.models import Appointment, AppointmentReminder, User
 from app.security import send_app_email
+from app.timeutils import utc_now
 
 REMINDER_24H = '24h'
 REMINDER_2H = '2h'
-
-
-def _utc_now_naive() -> datetime:
-    """Return a UTC timestamp compatible with the project's naive SQLite columns."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _reminder_type_for(remaining: timedelta) -> str | None:
@@ -146,7 +142,7 @@ def process_appointment_reminders(
                 user_id=user.id,
                 reminder_type=reminder_type,
                 scheduled_for=appointment.date,
-                sent_at=_utc_now_naive(),
+                sent_at=utc_now(),
             )
             db.session.add(reminder)
             notify_user(
@@ -172,7 +168,7 @@ def process_appointment_reminders(
             if send_email and user.email and user.email_verified:
                 stats['emails_attempted'] += 1
                 subject, body = _email_body(appointment, user, reminder_type)
-                reminder.email_attempted_at = _utc_now_naive()
+                reminder.email_attempted_at = utc_now()
                 reminder.email_sent = bool(send_app_email(user.email, subject, body))
                 if reminder.email_sent:
                     stats['emails_sent'] += 1

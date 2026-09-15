@@ -4,6 +4,7 @@ from app import db
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import text
+from app.timeutils import utc_now
 
 
 class User(UserMixin, db.Model):
@@ -21,7 +22,7 @@ class User(UserMixin, db.Model):
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
-        self.password_changed_at = datetime.utcnow()
+        self.password_changed_at = utc_now()
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
@@ -133,6 +134,11 @@ class Appointment(db.Model):
     patient = db.relationship('Patient', backref=db.backref('appointments', lazy=True))
     doctor = db.relationship('Doctor', backref=db.backref('appointments', lazy=True))
 
+    __table_args__ = (
+        db.Index('ix_appointment_doctor_date_status', 'doctor_id', 'date', 'status'),
+        db.Index('ix_appointment_patient_date_status', 'patient_id', 'date', 'status'),
+    )
+
     @property
     def active_prescription(self):
         return next((p for p in self.prescriptions if not getattr(p, 'is_deleted', False)), None)
@@ -168,6 +174,7 @@ class Admission(db.Model):
     discharged_by = db.relationship('User', foreign_keys=[discharged_by_id])
 
     __table_args__ = (
+        db.Index('ix_admission_department_status_admitted', 'department_id', 'status', 'admitted_at'),
         db.Index(
             'ix_admission_active_patient_unique',
             'patient_id',
@@ -246,6 +253,11 @@ class LabOrder(db.Model):
     appointment = db.relationship('Appointment', backref=db.backref('lab_orders', lazy=True), foreign_keys=[appointment_id])
     admission = db.relationship('Admission', backref=db.backref('lab_orders', lazy=True), foreign_keys=[admission_id])
 
+    __table_args__ = (
+        db.Index('ix_lab_order_patient_status_ordered', 'patient_id', 'status', 'ordered_at'),
+        db.Index('ix_lab_order_doctor_status_ordered', 'doctor_id', 'status', 'ordered_at'),
+    )
+
 
 class LabOrderItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -304,6 +316,10 @@ class Invoice(db.Model):
     patient = db.relationship('Patient', backref=db.backref('invoices', lazy=True), foreign_keys=[patient_id])
     appointment = db.relationship('Appointment', backref=db.backref('invoices', lazy=True), foreign_keys=[appointment_id])
     admission = db.relationship('Admission', backref=db.backref('invoices', lazy=True), foreign_keys=[admission_id])
+
+    __table_args__ = (
+        db.Index('ix_invoice_patient_status_created', 'patient_id', 'status', 'created_at'),
+    )
 
 
 class InvoiceItem(db.Model):
@@ -371,6 +387,10 @@ class DoctorAvailability(db.Model):
     updated_at = db.Column(db.DateTime, default=db.func.current_timestamp(), onupdate=db.func.current_timestamp())
     doctor = db.relationship('Doctor', backref=db.backref('availability', lazy=True))
 
+    __table_args__ = (
+        db.Index('ix_doctor_availability_doctor_date_available', 'doctor_id', 'date', 'is_available'),
+    )
+
 
 class Notification(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -405,6 +425,7 @@ class AppointmentReminder(db.Model):
             'appointment_id', 'user_id', 'reminder_type', 'scheduled_for',
             name='uq_appointment_reminder_delivery',
         ),
+        db.Index('ix_appointment_reminder_schedule_type', 'scheduled_for', 'reminder_type'),
     )
 
 
@@ -432,7 +453,9 @@ class WaitlistEntry(db.Model):
             'patient_id', 'doctor_id', 'target_date',
             unique=True,
             sqlite_where=text("status IN ('Waiting', 'Offered')"),
+            postgresql_where=text("status IN ('Waiting', 'Offered')"),
         ),
+        db.Index('ix_waitlist_doctor_date_status_created', 'doctor_id', 'target_date', 'status', 'created_at'),
     )
 
 
@@ -448,10 +471,14 @@ class AuditLog(db.Model):
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
     user = db.relationship('User', backref=db.backref('audit_logs', lazy=True))
 
+    __table_args__ = (
+        db.Index('ix_audit_log_created_action', 'created_at', 'action'),
+    )
+
 
 class LoginAttempt(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(100), nullable=False, index=True)
     ip_fingerprint = db.Column(db.String(32), nullable=False, index=True)
     success = db.Column(db.Boolean, default=False, nullable=False)
-    attempted_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    attempted_at = db.Column(db.DateTime, default=utc_now, nullable=False, index=True)

@@ -19,6 +19,7 @@ from urllib.parse import urljoin, urlparse
 
 from flask import current_app, request, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from app.timeutils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -173,4 +174,4 @@ def send_password_reset_email(user) -> bool:
 
 
 def login_window_start() -> datetime:
-    return datetime.utcnow() - timedelta(minutes=current_app.config.get('LOGIN_RATE_WINDOW_MINUTES', 15))
+    return utc_now() - timedelta(minutes=current_app.config.get('LOGIN_RATE_WINDOW_MINUTES', 15))

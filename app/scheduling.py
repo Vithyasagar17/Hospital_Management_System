@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, time
 
 from app.models import Appointment, DoctorAvailability, WaitlistEntry
+from app.timeutils import utc_now
 
 SLOT_MINUTES = 30
 ACTIVE_APPOINTMENT_STATUSES = ('Pending', 'Confirmed')
@@ -82,7 +83,7 @@ def available_slots_for_doctor(doctor_id, start_date=None, days=8, exclude_appoi
         WaitlistEntry.status == 'Offered',
         WaitlistEntry.offered_slot >= datetime.combine(start_date, time.min),
         WaitlistEntry.offered_slot < datetime.combine(end_date + timedelta(days=1), time.min),
-        WaitlistEntry.offer_expires_at > datetime.utcnow(),
+        WaitlistEntry.offer_expires_at > utc_now(),
     )
     if exclude_waitlist_entry_id is not None:
         holds = holds.filter(WaitlistEntry.id != exclude_waitlist_entry_id)

@@ -18,6 +18,7 @@ from app.waitlist import (
     offer_released_slot,
 )
 from tests.conftest import login
+from app.timeutils import utc_now
 
 
 TARGET = datetime(2030, 2, 10, 10, 0, 0)
@@ -157,10 +158,10 @@ def test_expired_offer_promotes_next_waiting_patient(app):
 
         offered = offer_released_slot(doctor_id, TARGET)
         assert offered.id == first.id
-        first.offer_expires_at = datetime.utcnow() - timedelta(seconds=1)
+        first.offer_expires_at = utc_now() - timedelta(seconds=1)
         db.session.commit()
 
-        result = expire_waitlist_offers(now_utc=datetime.utcnow())
+        result = expire_waitlist_offers(now_utc=utc_now())
         db.session.commit()
         assert result['expired'] == 1
         assert result['promoted'] == 1

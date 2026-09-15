@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation
 
 from app import db
 from app.models import Admission, Appointment, Doctor, LabOrder, LabOrderItem, LabTest, Patient
+from app.timeutils import utc_now
 
 
 LAB_ORDER_STATUSES = ('Ordered', 'Sample Collected', 'Processing', 'Completed', 'Cancelled')
@@ -111,7 +112,7 @@ def create_lab_order(*, patient_id, doctor_id, test_ids, priority='Routine', cli
         priority=priority,
         status='Ordered',
         clinical_notes=(clinical_notes or '').strip() or None,
-        ordered_at=datetime.utcnow(),
+        ordered_at=utc_now(),
     )
     db.session.add(order)
     db.session.flush()
@@ -139,7 +140,7 @@ def transition_lab_order(order, new_status, *, cancelled_reason=None, specimen_i
     if new_status not in LAB_TRANSITIONS.get(order.status, ()):
         raise ValueError(f'Cannot move a laboratory order from {order.status} to {new_status}.')
 
-    now = datetime.utcnow()
+    now = utc_now()
     if new_status == 'Sample Collected':
         specimen_id = (specimen_id or '').strip().upper()
         if not specimen_id:
@@ -172,7 +173,7 @@ def complete_lab_order(order, result_payload):
     if not order.items:
         raise ValueError('This laboratory order has no tests.')
 
-    now = datetime.utcnow()
+    now = utc_now()
     prepared = []
     for item in order.items:
         payload = result_payload.get(item.id, {})

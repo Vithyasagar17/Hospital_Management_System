@@ -1,78 +1,31 @@
-import os
+from pathlib import Path
 from datetime import datetime, timedelta
+
+from flask_migrate import upgrade
+from sqlalchemy.engine import make_url
+
 from app import create_app, db
 from app.models import User, Specialization, Department, Doctor, Patient, DoctorAvailability, Appointment, Prescription, PrescriptionItem, Notification, AuditLog, LabTest, BillingService
 
+
 app = create_app()
 
+# This script is intentionally a LOCAL-DEVELOPMENT reset. Production databases
+# must be changed through Alembic migrations and must never be dropped here.
+database_url = make_url(app.config['SQLALCHEMY_DATABASE_URI'])
+if database_url.get_backend_name() != 'sqlite':
+    raise RuntimeError(
+        'create_db.py only resets the local SQLite demo database. '
+        'Use `flask --app run db upgrade` for PostgreSQL.'
+    )
+
+database_path = Path(database_url.database)
+if database_path.exists():
+    database_path.unlink()
+
 with app.app_context():
-    os.makedirs(app.instance_path, exist_ok=True)
-
-    db_path = os.path.join(app.instance_path, 'hms.db')
-
-    # Explicit reset command: rebuild the schema cleanly without unlinking an
-    # SQLite file while SQLAlchemy may still hold an open connection.
-    db.drop_all()
-    db.create_all()
-
-    from sqlalchemy import text
-
-    try:
-        existing_appt_cols = {row[1] for row in db.session.execute(text("PRAGMA table_info('appointment')")).fetchall()}
-    except Exception:
-        existing_appt_cols = set()
-
-    appt_extras = {
-        'notes': 'TEXT',
-        'created_at': 'DATETIME',
-        'updated_at': 'DATETIME'
-    }
-
-    for col, sqltype in appt_extras.items():
-        if col not in existing_appt_cols:
-            try:
-                db.session.execute(text(f"ALTER TABLE appointment ADD COLUMN {col} {sqltype}"))
-            except Exception as e:
-                _ = e
-    db.session.commit()
-
-    try:
-        existing_cols = {row[1] for row in db.session.execute(text("PRAGMA table_info('patient')")).fetchall()}
-    except Exception:
-        existing_cols = set()
-
-    extras = {
-        'age': 'INTEGER',
-        'gender': 'VARCHAR(20)',
-        'height': 'REAL',
-        'weight': 'REAL',
-        'is_blacklisted': 'BOOLEAN',
-    }
-
-    for col, sqltype in extras.items():
-        if col not in existing_cols:
-            try:
-                db.session.execute(text(f"ALTER TABLE patient ADD COLUMN {col} {sqltype}"))
-            except Exception as e:
-                _ = e
-    db.session.commit()
-
-    try:
-        existing_doctor_cols = {row[1] for row in db.session.execute(text("PRAGMA table_info('doctor')")).fetchall()}
-    except Exception:
-        existing_doctor_cols = set()
-
-    doctor_extras = {
-        'is_blacklisted': 'BOOLEAN',
-    }
-
-    for col, sqltype in doctor_extras.items():
-        if col not in existing_doctor_cols:
-            try:
-                db.session.execute(text(f"ALTER TABLE doctor ADD COLUMN {col} {sqltype}"))
-            except Exception as e:
-                _ = e
-    db.session.commit()
+    # Build the schema from the immutable Alembic history, not db.create_all().
+    upgrade(directory='migrations')
 
     if not User.query.filter_by(username='admin').first():
         admin = User(username='admin', email='admin@medora.local', email_verified=True, role='Admin')
@@ -243,4 +196,4 @@ with app.app_context():
             ])
         db.session.commit()
 
-    print("Database created successfully!")
+    print("Database migrated and seeded successfully!")

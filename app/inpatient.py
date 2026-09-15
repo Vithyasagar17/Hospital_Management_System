@@ -10,6 +10,7 @@ from datetime import datetime
 
 from app import db
 from app.models import Admission, Bed, BedTransfer, Department, Doctor, Patient, Ward
+from app.timeutils import utc_now
 
 
 WARD_TYPES = ('General', 'ICU', 'Private', 'Emergency', 'Other')
@@ -149,7 +150,7 @@ def admit_patient(*, patient_id, doctor_id, department_id, bed_id, reason,
         ward_id=bed.ward_id,
         bed_id=bed.id,
         appointment_id=appointment_id,
-        admitted_at=datetime.utcnow(),
+        admitted_at=utc_now(),
         reason=reason.strip(),
         diagnosis=(diagnosis or '').strip() or None,
         status='Active',
@@ -157,7 +158,7 @@ def admit_patient(*, patient_id, doctor_id, department_id, bed_id, reason,
         created_by_id=created_by_id,
     )
     bed.status = 'Occupied'
-    bed.updated_at = datetime.utcnow()
+    bed.updated_at = utc_now()
     db.session.add(admission)
     db.session.flush()
     return admission
@@ -187,19 +188,19 @@ def transfer_admission(admission, *, to_bed_id, transferred_by_id=None, reason=N
         to_ward_id=target.ward_id,
         to_bed_id=target.id,
         reason=(reason or '').strip() or None,
-        transferred_at=datetime.utcnow(),
+        transferred_at=utc_now(),
         transferred_by_id=transferred_by_id,
         from_daily_rate_snapshot=old_ward.daily_rate,
         to_daily_rate_snapshot=target.ward.daily_rate,
     )
 
     old_bed.status = 'Available'
-    old_bed.updated_at = datetime.utcnow()
+    old_bed.updated_at = utc_now()
     target.status = 'Occupied'
-    target.updated_at = datetime.utcnow()
+    target.updated_at = utc_now()
     admission.ward_id = target.ward_id
     admission.bed_id = target.id
-    admission.updated_at = datetime.utcnow()
+    admission.updated_at = utc_now()
     db.session.add(transfer)
     db.session.flush()
     return transfer
@@ -214,12 +215,12 @@ def discharge_admission(admission, *, summary, discharged_by_id=None):
 
     bed = admission.bed
     admission.status = 'Discharged'
-    admission.discharged_at = datetime.utcnow()
+    admission.discharged_at = utc_now()
     admission.discharge_summary = summary.strip()
     admission.discharged_by_id = discharged_by_id
-    admission.updated_at = datetime.utcnow()
+    admission.updated_at = utc_now()
     if bed and bed.status == 'Occupied':
         bed.status = 'Available'
-        bed.updated_at = datetime.utcnow()
+        bed.updated_at = utc_now()
     db.session.flush()
     return admission

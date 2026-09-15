@@ -9,6 +9,7 @@ from app.scheduling import (
     has_active_patient_conflict,
     is_valid_booking_slot,
 )
+from app.timeutils import utc_now
 
 WAITLIST_OFFER_MINUTES = 15
 ACTIVE_WAITLIST_STATUSES = ('Waiting', 'Offered')
@@ -42,7 +43,7 @@ def is_waitlistable_day(doctor_id, target_date):
         WaitlistEntry.status == 'Offered',
         WaitlistEntry.offered_slot >= day_start,
         WaitlistEntry.offered_slot < day_end,
-        WaitlistEntry.offer_expires_at > datetime.utcnow(),
+        WaitlistEntry.offer_expires_at > utc_now(),
     ).count()
     return (active_count + active_holds) > 0
 
@@ -84,7 +85,7 @@ def offer_released_slot(doctor_id, released_slot, *, now=None, offer_minutes=WAI
         patient = db.session.get(Patient, entry.patient_id)
         if not patient or patient.is_blacklisted:
             entry.status = 'Cancelled'
-            entry.updated_at = datetime.utcnow()
+            entry.updated_at = utc_now()
             continue
         if has_active_patient_conflict(entry.patient_id, released_slot):
             # Keep the patient in the queue for a different slot that day.
@@ -92,9 +93,9 @@ def offer_released_slot(doctor_id, released_slot, *, now=None, offer_minutes=WAI
 
         entry.status = 'Offered'
         entry.offered_slot = released_slot
-        entry.offered_at = datetime.utcnow()
-        entry.offer_expires_at = datetime.utcnow() + timedelta(minutes=offer_minutes)
-        entry.updated_at = datetime.utcnow()
+        entry.offered_at = utc_now()
+        entry.offer_expires_at = utc_now() + timedelta(minutes=offer_minutes)
+        entry.updated_at = utc_now()
         notify_user(
             entry.patient_id,
             'Waitlist slot available',
@@ -116,7 +117,7 @@ def offer_released_slot(doctor_id, released_slot, *, now=None, offer_minutes=WAI
 
 def expire_waitlist_offers(*, now_utc=None):
     """Expire timed-out offers and promote each still-free slot to the next patient."""
-    now_utc = now_utc or datetime.utcnow()
+    now_utc = now_utc or utc_now()
     expired = WaitlistEntry.query.filter(
         WaitlistEntry.status == 'Offered',
         WaitlistEntry.offer_expires_at.isnot(None),
@@ -146,7 +147,7 @@ def expire_waitlist_offers(*, now_utc=None):
 
 def claim_waitlist_offer(entry, *, now_utc=None, now_local=None):
     """Convert a valid offer into a Pending appointment. Caller commits."""
-    now_utc = now_utc or datetime.utcnow()
+    now_utc = now_utc or utc_now()
     now_local = now_local or datetime.now()
 
     if entry.status != 'Offered' or not entry.offered_slot:

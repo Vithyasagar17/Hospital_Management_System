@@ -1,0 +1,148 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-medora_hms}
+      POSTGRES_USER: ${POSTGRES_USER:-medora_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medora_dev_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - medora_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - medora_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      HMS_ENV: ${HMS_ENV:-development}
+      HMS_DATABASE_URL: postgresql://${POSTGRES_USER:-medora_user}:${POSTGRES_PASSWORD:-medora_dev_password}@db:5432/${POSTGRES_DB:-medora_hms}
+      HMS_SECRET_KEY: ${HMS_SECRET_KEY:-change-me-before-production}
+      HMS_COOKIE_SECURE: ${HMS_COOKIE_SECURE:-0}
+      HMS_TIMEZONE: ${HMS_TIMEZONE:-Asia/Kolkata}
+      HMS_RUN_MIGRATIONS: ${HMS_RUN_MIGRATIONS:-1}
+      HMS_MAIL_MODE: ${HMS_MAIL_MODE:-console}
+      HMS_SMTP_SERVER: ${HMS_SMTP_SERVER:-}
+      HMS_SMTP_PORT: ${HMS_SMTP_PORT:-587}
+      HMS_SMTP_USERNAME: ${HMS_SMTP_USERNAME:-}
+      HMS_SMTP_PASSWORD: ${HMS_SMTP_PASSWORD:-}
+      HMS_SMTP_FROM: ${HMS_SMTP_FROM:-}
+      HMS_SMTP_USE_TLS: ${HMS_SMTP_USE_TLS:-1}
+      HMS_SMTP_USE_SSL: ${HMS_SMTP_USE_SSL:-0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      HMS_SERVICE_NAME: web
+      HMS_LOG_FORMAT: ${HMS_LOG_FORMAT:-json}
+      HMS_LOG_LEVEL: ${HMS_LOG_LEVEL:-INFO}
+      HMS_LOG_HEALTH_REQUESTS: ${HMS_LOG_HEALTH_REQUESTS:-0}
+      HMS_HEALTH_REQUIRE_REDIS: ${HMS_HEALTH_REQUIRE_REDIS:-1}
+      HMS_METRICS_ENABLED: ${HMS_METRICS_ENABLED:-1}
+      PORT: 8000
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+      GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-60}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    command: ["celery", "-A", "celery_worker:celery_app", "worker", "--loglevel=INFO", "--concurrency=${CELERY_WORKER_CONCURRENCY:-2}"]
+    environment:
+      HMS_ENV: ${HMS_ENV:-development}
+      HMS_DATABASE_URL: postgresql://${POSTGRES_USER:-medora_user}:${POSTGRES_PASSWORD:-medora_dev_password}@db:5432/${POSTGRES_DB:-medora_hms}
+      HMS_SECRET_KEY: ${HMS_SECRET_KEY:-change-me-before-production}
+      HMS_COOKIE_SECURE: ${HMS_COOKIE_SECURE:-0}
+      HMS_TIMEZONE: ${HMS_TIMEZONE:-Asia/Kolkata}
+      HMS_RUN_MIGRATIONS: 0
+      HMS_MAIL_MODE: ${HMS_MAIL_MODE:-console}
+      HMS_SMTP_SERVER: ${HMS_SMTP_SERVER:-}
+      HMS_SMTP_PORT: ${HMS_SMTP_PORT:-587}
+      HMS_SMTP_USERNAME: ${HMS_SMTP_USERNAME:-}
+      HMS_SMTP_PASSWORD: ${HMS_SMTP_PASSWORD:-}
+      HMS_SMTP_FROM: ${HMS_SMTP_FROM:-}
+      HMS_SMTP_USE_TLS: ${HMS_SMTP_USE_TLS:-1}
+      HMS_SMTP_USE_SSL: ${HMS_SMTP_USE_SSL:-0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      HMS_SERVICE_NAME: worker
+      HMS_LOG_FORMAT: ${HMS_LOG_FORMAT:-json}
+      HMS_LOG_LEVEL: ${HMS_LOG_LEVEL:-INFO}
+      HMS_BACKGROUND_REMIND_DOCTORS: ${HMS_BACKGROUND_REMIND_DOCTORS:-0}
+      HMS_BACKGROUND_SEND_REMINDER_EMAILS: ${HMS_BACKGROUND_SEND_REMINDER_EMAILS:-0}
+      CELERY_REMINDER_INTERVAL_SECONDS: ${CELERY_REMINDER_INTERVAL_SECONDS:-300}
+      CELERY_WAITLIST_INTERVAL_SECONDS: ${CELERY_WAITLIST_INTERVAL_SECONDS:-60}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    command: ["celery", "-A", "celery_worker:celery_app", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
+    environment:
+      HMS_ENV: ${HMS_ENV:-development}
+      HMS_DATABASE_URL: postgresql://${POSTGRES_USER:-medora_user}:${POSTGRES_PASSWORD:-medora_dev_password}@db:5432/${POSTGRES_DB:-medora_hms}
+      HMS_SECRET_KEY: ${HMS_SECRET_KEY:-change-me-before-production}
+      HMS_COOKIE_SECURE: ${HMS_COOKIE_SECURE:-0}
+      HMS_TIMEZONE: ${HMS_TIMEZONE:-Asia/Kolkata}
+      HMS_RUN_MIGRATIONS: 0
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      HMS_SERVICE_NAME: beat
+      HMS_LOG_FORMAT: ${HMS_LOG_FORMAT:-json}
+      HMS_LOG_LEVEL: ${HMS_LOG_LEVEL:-INFO}
+      CELERY_REMINDER_INTERVAL_SECONDS: ${CELERY_REMINDER_INTERVAL_SECONDS:-300}
+      CELERY_WAITLIST_INTERVAL_SECONDS: ${CELERY_WAITLIST_INTERVAL_SECONDS:-60}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      worker:
+        condition: service_started
+
+volumes:
+  medora_postgres_data:
+  medora_redis_data:
