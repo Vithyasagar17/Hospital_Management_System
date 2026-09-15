@@ -48,6 +48,7 @@ def make_celery(app) -> Celery:
         result_expires=3600,
         task_track_started=True,
         worker_prefetch_multiplier=1,
+        worker_hijack_root_logger=False,
         timezone=os.environ.get('HMS_TIMEZONE', 'Asia/Kolkata'),
         enable_utc=True,
         beat_schedule={

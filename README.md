@@ -204,3 +204,14 @@ See `PHASE7_UPGRADE_NOTES.md` before adopting Alembic on an existing Phase 6 SQL
 - Docker Compose services for `redis`, `worker`, and `beat`
 
 See `PHASE7C_UPGRADE_NOTES.md` for configuration, operations, and verification commands.
+
+
+## Phase 7E observability
+
+- JSON structured logs to stdout
+- Request correlation through `X-Request-ID`
+- Liveness and dependency-aware readiness probes
+- Lightweight Prometheus-style HTTP/dependency metrics
+- Docker healthcheck backed by `/health/live`
+
+See `PHASE7E_UPGRADE_NOTES.md` for operational commands and configuration.

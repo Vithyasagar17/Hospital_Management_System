@@ -55,6 +55,12 @@ services:
       HMS_SMTP_USE_SSL: ${HMS_SMTP_USE_SSL:-0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      HMS_SERVICE_NAME: web
+      HMS_LOG_FORMAT: ${HMS_LOG_FORMAT:-json}
+      HMS_LOG_LEVEL: ${HMS_LOG_LEVEL:-INFO}
+      HMS_LOG_HEALTH_REQUESTS: ${HMS_LOG_HEALTH_REQUESTS:-0}
+      HMS_HEALTH_REQUIRE_REDIS: ${HMS_HEALTH_REQUIRE_REDIS:-1}
+      HMS_METRICS_ENABLED: ${HMS_METRICS_ENABLED:-1}
       PORT: 8000
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
       GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
@@ -65,7 +71,7 @@ services:
     ports:
       - "${APP_PORT:-8000}:8000"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/login', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -95,6 +101,9 @@ services:
       HMS_SMTP_USE_SSL: ${HMS_SMTP_USE_SSL:-0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      HMS_SERVICE_NAME: worker
+      HMS_LOG_FORMAT: ${HMS_LOG_FORMAT:-json}
+      HMS_LOG_LEVEL: ${HMS_LOG_LEVEL:-INFO}
       HMS_BACKGROUND_REMIND_DOCTORS: ${HMS_BACKGROUND_REMIND_DOCTORS:-0}
       HMS_BACKGROUND_SEND_REMINDER_EMAILS: ${HMS_BACKGROUND_SEND_REMINDER_EMAILS:-0}
       CELERY_REMINDER_INTERVAL_SECONDS: ${CELERY_REMINDER_INTERVAL_SECONDS:-300}
@@ -121,6 +130,9 @@ services:
       HMS_RUN_MIGRATIONS: 0
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      HMS_SERVICE_NAME: beat
+      HMS_LOG_FORMAT: ${HMS_LOG_FORMAT:-json}
+      HMS_LOG_LEVEL: ${HMS_LOG_LEVEL:-INFO}
       CELERY_REMINDER_INTERVAL_SECONDS: ${CELERY_REMINDER_INTERVAL_SECONDS:-300}
       CELERY_WAITLIST_INTERVAL_SECONDS: ${CELERY_WAITLIST_INTERVAL_SECONDS:-60}
     depends_on:
